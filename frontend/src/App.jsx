@@ -1,7 +1,9 @@
+import TimetableGrid from './components/TimetableGrid';
+
 export default function App() {
   return (
-    <div className="flex h-screen items-center justify-center bg-blue-500">
-      <h1 className="text-4xl font-bold text-white">Tailwind is Working!</h1>
+    <div className="min-h-screen bg-gray-100 py-10">
+      <TimetableGrid />
     </div>
-  )
+  );
 }

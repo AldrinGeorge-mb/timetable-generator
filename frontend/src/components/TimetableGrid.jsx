@@ -1,17 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+// Forces Tailwind to compile all 20 rich color classes for the runtime data
+const TAILWIND_SAFELIST = [
+    'bg-red-200 border-red-400',
+    'bg-blue-200 border-blue-400',
+    'bg-green-200 border-green-400',
+    'bg-yellow-200 border-yellow-400',
+    'bg-purple-200 border-purple-400',
+    'bg-orange-200 border-orange-400',
+    'bg-pink-200 border-pink-400',
+    'bg-teal-200 border-teal-400',
+    'bg-indigo-200 border-indigo-400',
+    'bg-lime-200 border-lime-400',
+    'bg-amber-200 border-amber-400',
+    'bg-cyan-200 border-cyan-400',
+    'bg-fuchsia-200 border-fuchsia-400',
+    'bg-emerald-200 border-emerald-400',
+    'bg-violet-200 border-violet-400',
+    'bg-rose-200 border-rose-400',
+    'bg-sky-200 border-sky-400',
+    'bg-slate-200 border-slate-400',
+    'bg-stone-200 border-stone-400',
+    'bg-zinc-200 border-zinc-400'
+];
 
-// --- 1. THE DRAGGABLE BLOCK COMPONENT ---
+// --- DRAGGABLE COMPONENT ---
 function DraggableBlock({ slot }) {
     const { attributes, listeners, setNodeRef, transform } = useDraggable({
-        id: slot.id, // This unique ID tells dnd-kit exactly WHICH block is being dragged
-        data: slot,  // We pass the class data so we know what we are dragging
+        id: slot.id,
+        data: slot,
     });
 
-    // This applies the actual movement to the block when you drag it
     const style = transform ? {
         transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
         zIndex: 50,
@@ -23,7 +45,7 @@ function DraggableBlock({ slot }) {
             style={style}
             {...listeners}
             {...attributes}
-            className={`w-full h-full border rounded p-2 flex flex-col justify-center items-center cursor-grab active:cursor-grabbing shadow-sm hover:shadow transition-shadow ${slot.color}`}
+            className={`w-full h-full border rounded p-2 flex flex-col justify-center items-center cursor-grab active:cursor-grabbing shadow-sm hover:shadow transition-shadow ${slot.color || 'bg-blue-50 border-blue-200'}`}
         >
             <span className="font-bold text-gray-800 text-sm">{slot.subject}</span>
             <span className="text-xs text-gray-600 mt-1">{slot.teacher}</span>
@@ -31,17 +53,16 @@ function DraggableBlock({ slot }) {
     );
 }
 
-// --- 2. THE DROPPABLE CELL COMPONENT ---
+// --- DROPPABLE COMPONENT ---
 function DroppableCell({ day, period, children }) {
     const { isOver, setNodeRef } = useDroppable({
-        id: `${day}-${period}`, // e.g., "Monday-1" - Tells dnd-kit exactly WHERE the drop zone is
+        id: `${day}-${period}`,
         data: { day, period }
     });
 
     return (
         <td
             ref={setNodeRef}
-            // If we are hovering over this cell, give it a slight blue tint to show it's ready to receive
             className={`p-2 border-r border-gray-100 align-top w-40 h-28 transition-colors ${isOver ? 'bg-blue-50' : ''}`}
         >
             {children ? children : (
@@ -53,23 +74,32 @@ function DroppableCell({ day, period, children }) {
     );
 }
 
-// --- 3. THE MAIN GRID COMPONENT ---
+// --- MAIN GRID COMPONENT ---
 export default function TimetableGrid() {
-    const [schedule, setSchedule] = useState([
-        { id: '1', day: 'Monday', period: 1, subject: 'HINDI', teacher: 'BETTY TR', color: 'bg-orange-100 border-orange-300' },
-        { id: '2', day: 'Monday', period: 2, subject: 'SCI', teacher: 'NEETHU TR', color: 'bg-green-100 border-green-300' },
-        { id: '3', day: 'Tuesday', period: 1, subject: 'MATHS', teacher: 'RAVEENA TR', color: 'bg-blue-100 border-blue-300' },
-        { id: '4', day: 'Tuesday', period: 2, subject: 'ENG', teacher: 'EMY TR', color: 'bg-purple-100 border-purple-300' },
-    ]);
+    const [schedule, setSchedule] = useState([]);
+    const [log, setLog] = useState({ message: 'Connecting to backend server...', type: 'info' });
 
-    // This state holds the current message and whether it's an error or success
-    const [log, setLog] = useState({ message: 'Ready to schedule. Drag a block to move it.', type: 'info' });
+    // *** THIS IS THE BRIDGE TO THE BACKEND ***
+    useEffect(() => {
+        fetch('http://localhost:5000/api/schedule')
+            .then(res => {
+                if (!res.ok) throw new Error("Network response was not ok");
+                return res.json();
+            })
+            .then(data => {
+                setSchedule(data);
+                setLog({ message: 'Successfully loaded generated schedule from backend!', type: 'success' });
+            })
+            .catch(err => {
+                console.error("Error fetching data:", err);
+                setLog({ message: 'Failed to connect to backend. Is the server running on port 5000?', type: 'error' });
+            });
+    }, []);
 
     const getSlotData = (day, period) => {
         return schedule.find(slot => slot.day === day && slot.period === period);
     };
 
-    // --- 4. THE DRAG LOGIC ---
     const handleDragEnd = (event) => {
         const { active, over } = event;
         if (!over) return;
@@ -78,28 +108,17 @@ export default function TimetableGrid() {
         const newDay = over.data.current.day;
         const newPeriod = over.data.current.period;
 
-        // Find the actual data of the block we are dragging
         const draggedBlock = schedule.find(slot => slot.id === draggedBlockId);
-
-        // Find if someone is already sitting in the drop zone
         const occupant = schedule.find(slot => slot.day === newDay && slot.period === newPeriod);
 
         if (occupant) {
-            // SWAP LOGIC: 
-            // 1. Move the occupant to the dragged block's old home
-            // 2. Move the dragged block to the new home
             setSchedule(prevSchedule => prevSchedule.map(slot => {
-                if (slot.id === occupant.id) {
-                    return { ...slot, day: draggedBlock.day, period: draggedBlock.period };
-                }
-                if (slot.id === draggedBlockId) {
-                    return { ...slot, day: newDay, period: newPeriod };
-                }
+                if (slot.id === occupant.id) return { ...slot, day: draggedBlock.day, period: draggedBlock.period };
+                if (slot.id === draggedBlockId) return { ...slot, day: newDay, period: newPeriod };
                 return slot;
             }));
-            setLog({ message: `Successfully swapped ${draggedBlock.subject} with ${occupant.subject}.`, type: 'success' });
+            setLog({ message: `Swapped ${draggedBlock.subject} with ${occupant.subject}.`, type: 'success' });
         } else {
-            // MOVE LOGIC (Empty cell)
             setSchedule(prevSchedule => prevSchedule.map(slot =>
                 slot.id === draggedBlockId ? { ...slot, day: newDay, period: newPeriod } : slot
             ));
@@ -110,21 +129,19 @@ export default function TimetableGrid() {
     return (
         <DndContext onDragEnd={handleDragEnd}>
             <div className="p-8 max-w-[90rem] mx-auto">
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-4">
                     <div>
                         <h2 className="text-2xl font-bold text-gray-800">Class 5A - Schedule</h2>
-                        <p className="text-gray-500 text-sm mt-1">Interactive Draft Mode</p>
+                        <p className="text-gray-500 text-sm mt-1">AI Generated Draft</p>
                     </div>
                 </div>
+
                 {/* Validation Log Panel */}
                 <div className={`mb-6 p-4 rounded-md border ${log.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
-                        log.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' :
-                            'bg-blue-50 border-blue-200 text-blue-700'
+                    log.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' :
+                        'bg-blue-50 border-blue-200 text-blue-700'
                     }`}>
                     <div className="flex items-center">
-                        <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                        </svg>
                         <span className="font-medium">{log.message}</span>
                     </div>
                 </div>
@@ -150,9 +167,7 @@ export default function TimetableGrid() {
                                     {PERIODS.map(period => {
                                         const slot = getSlotData(day, period);
                                         return (
-                                            // We wrap every cell in our new DroppableCell component
                                             <DroppableCell key={`${day}-${period}`} day={day} period={period}>
-                                                {/* If there is data, render the DraggableBlock inside it */}
                                                 {slot && <DraggableBlock slot={slot} />}
                                             </DroppableCell>
                                         );

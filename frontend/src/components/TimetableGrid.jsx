@@ -1,10 +1,16 @@
-import { useState, useEffect, useCallback, memo } from 'react';
-import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
-import { restrictToFirstScrollableAncestor } from '@dnd-kit/modifiers';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
+import ExportModal from './ExportModal';
 
 const API = 'http://localhost:5000';
+
+const authFetch = (url, options = {}) => {
+    const token = localStorage.getItem('token');
+    const headers = { ...options.headers };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(url, { ...options, headers });
+};
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
 
@@ -14,7 +20,7 @@ const _SAFELIST = [
     'bg-green-200 border-green-400', 'bg-yellow-200 border-yellow-400',
     'bg-purple-200 border-purple-400', 'bg-orange-200 border-orange-400',
     'bg-pink-200 border-pink-400', 'bg-teal-200 border-teal-400',
-    'bg-indigo-200 border-indigo-400', 'bg-lime-200 border-lime-400',
+    'bg-indigo-200 border-indigo-600', 'bg-lime-200 border-lime-400',
     'bg-amber-200 border-amber-400', 'bg-cyan-200 border-cyan-400',
     'bg-fuchsia-200 border-fuchsia-400', 'bg-emerald-200 border-emerald-400',
     'bg-violet-200 border-violet-400', 'bg-rose-200 border-rose-400',
@@ -23,67 +29,72 @@ const _SAFELIST = [
 ];
 
 // ─── Draggable Block ───────────────────────────────────────────────────────────
-const DraggableBlock = memo(function DraggableBlock({ slot, onDelete, justMoved }) {
-    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-        id: slot.id,
-        data: slot,
-    });
+// 1x1 transparent GIF used to suppress the browser's native drag ghost image
+const EMPTY_IMG = new Image();
+EMPTY_IMG.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
-    const style = transform ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        zIndex: 100,
-        opacity: 0.95,
-    } : undefined;
-
+const DraggableBlock = memo(function DraggableBlock({ slot, onDelete, justMoved, onDragStart }) {
     return (
         <div
-            ref={setNodeRef}
-            style={style}
-            {...listeners}
-            {...attributes}
-            className={`group relative w-full h-full rounded-xl p-2 flex flex-col justify-center items-center cursor-grab active:cursor-grabbing transition-all duration-300 select-none shadow-sm border
-                ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-blue-100 border-blue-200'}
-                ${isDragging ? 'shadow-2xl scale-110 rotate-2 z-50 ring-4 ring-brand-400/30' : 'hover:shadow-md hover:scale-[1.03]'}
-                ${justMoved ? 'ring-2 ring-emerald-400 animate-pulse bg-emerald-100/80 border-emerald-300' : ''}`}
+            draggable
+            onDragStart={e => {
+                e.dataTransfer.setDragImage(EMPTY_IMG, 0, 0);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', slot.id);
+                onDragStart(slot);
+            }}
+            onDragEnd={() => onDragStart(null)}
+            className={`group relative w-full h-full rounded-xl p-2 flex flex-col justify-center items-center cursor-grab active:cursor-grabbing select-none border shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]
+                ${slot.color ? slot.color : 'bg-white border-slate-200'}
+                ${justMoved ? 'ring-2 ring-indigo-400 animate-[pulse_1s_ease-in-out_2] bg-indigo-500/10 border-indigo-600/30' : 'hover:shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-200'}`}
         >
-            <div className="absolute inset-0 bg-white/20 rounded-xl pointer-events-none mix-blend-overlay"></div>
+            <div className="absolute inset-0 bg-white/30 rounded-xl pointer-events-none" />
             <button
-                onPointerDown={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
                 onClick={() => onDelete(slot.id, slot.subject)}
-                className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 text-rose-500 hover:text-white bg-white hover:bg-rose-500 border border-slate-200 hover:border-rose-500 rounded-full w-6 h-6 flex items-center justify-center text-[10px] font-black transition-all leading-none shadow-sm z-10"
+                className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 text-rose-600 hover:text-white bg-white hover:bg-rose-500 border border-slate-200 hover:border-rose-500 rounded-full w-6 h-6 flex items-center justify-center text-[10px] font-bold transition-all leading-none shadow-sm z-10"
             >✕</button>
-            <span className="font-extrabold text-slate-800 text-[13px] text-center leading-tight drop-shadow-sm relative z-10">{slot.subject}</span>
-            <span className="text-[10px] text-slate-600/80 font-bold mt-0.5 text-center leading-tight relative z-10">{slot.teacher}</span>
+            <span className="font-extrabold text-slate-800 text-[13px] text-center leading-tight relative z-10 tracking-tight">{slot.subject}</span>
+            <span className="text-[10px] text-slate-800 font-bold mt-0.5 text-center leading-tight relative z-10">{slot.teacher}</span>
         </div>
     );
 });
 
-const DroppableCell = memo(function DroppableCell({ day, period, children, isDraggingAny, isValid }) {
-    const { isOver, setNodeRef } = useDroppable({
-        id: `${day}-${period}`,
-        data: { day, period }
-    });
+const DroppableCell = memo(function DroppableCell({ day, period, children, isDraggingAny, isValid, onDrop, onDragOver }) {
+    const [isOver, setIsOver] = useState(false);
 
-    let bgClass = "bg-white/40";
+    let bgClass;
     if (isOver) {
-        bgClass = "bg-brand-50 ring-2 ring-inset ring-brand-400 z-10 relative shadow-[inset_0_0_20px_rgba(139,92,246,0.1)] rounded-xl";
+        bgClass = "bg-indigo-500/10 ring-2 ring-inset ring-indigo-400 z-10 relative rounded-xl shadow-sm";
     } else if (isDraggingAny) {
         if (isValid) {
-            bgClass = "bg-emerald-50/50 ring-2 ring-inset ring-emerald-300/50 shadow-[inset_0_0_15px_rgba(16,185,129,0.05)] rounded-xl";
+            bgClass = "bg-emerald-50/60 ring-2 ring-inset ring-emerald-400/60 rounded-xl";
         } else {
-            bgClass = "bg-rose-50/30 ring-1 ring-inset ring-rose-200/50 opacity-50 grayscale-[50%] rounded-xl";
+            bgClass = "bg-rose-50/40 ring-1 ring-inset ring-rose-200/50 opacity-60 grayscale-[30%] rounded-xl";
         }
     } else {
-        bgClass = "hover:bg-white/80 rounded-xl";
+        bgClass = "hover:bg-white/10/80 rounded-xl";
     }
 
     return (
         <td
-            ref={setNodeRef}
-            className={`p-1.5 align-top w-36 h-24 transition-all duration-300 ${bgClass}`}
+            className={`p-1.5 align-top h-24 transition-all duration-200 ${bgClass}`}
+            onDragOver={e => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setIsOver(true);
+                onDragOver && onDragOver(day, period);
+            }}
+            onDragLeave={() => setIsOver(false)}
+            onDrop={e => {
+                e.preventDefault();
+                setIsOver(false);
+                const id = e.dataTransfer.getData('text/plain');
+                onDrop(id, day, period);
+            }}
         >
             {children || (
-                <div className="w-full h-full border border-dashed border-slate-200/60 rounded-xl flex items-center justify-center text-slate-300 text-[10px] transition-colors">
+                <div className="w-full h-full border border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-[10px] transition-colors">
                     —
                 </div>
             )}
@@ -104,24 +115,24 @@ const MiniGrid = memo(function MiniGrid({ className, slots, previewChain, large 
     const headerPy = large ? "py-3.5" : "py-2.5";
 
     return (
-        <div className={`glass-card rounded-[20px] overflow-hidden ${large ? 'shadow-lg' : 'shadow-sm'}`}>
-            <div className={`bg-gradient-to-r from-brand-600 to-indigo-500 px-5 ${headerPy} border-b border-brand-400/30 shadow-inner`}>
-                <h3 className={`text-white font-extrabold tracking-tight ${headerSz}`}>Class {className}</h3>
+        <div className={`bg-white rounded-[20px] overflow-hidden border border-slate-200 ${large ? 'shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)]' : 'shadow-sm'}`}>
+            <div className={`bg-white px-5 ${headerPy} border-b border-slate-200`}>
+                <h3 className={`text-slate-800 font-extrabold tracking-tight ${headerSz}`}>Class {className}</h3>
             </div>
-            <div className="overflow-auto bg-white/50">
+            <div className="overflow-auto bg-slate-50">
                 <table className={`w-full text-center border-collapse ${textSz}`}>
                     <thead>
-                        <tr className="bg-slate-50/80 border-b border-slate-200/60 backdrop-blur-sm">
-                            <th className={`${thPy} px-1.5 border-r border-slate-200/50 text-slate-400 font-bold text-left w-14 uppercase tracking-wider`}></th>
+                        <tr className="bg-slate-50/80 border-b border-slate-200 backdrop-blur-sm">
+                            <th className={`${thPy} px-1.5 border-r border-slate-200 text-slate-400 font-bold text-left w-14 uppercase tracking-wider`}></th>
                             {PERIODS.map(p => (
-                                <th key={p} className={`${thPy} px-1 border-r border-slate-200/50 text-slate-500 font-bold w-11`}>P{p}</th>
+                                <th key={p} className={`${thPy} px-1 border-r border-slate-200 text-slate-500 font-bold w-11`}>P{p}</th>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {DAYS.map(day => (
-                            <tr key={day} className="border-b border-slate-100/50 hover:bg-white/40 transition-colors">
-                                <td className={`${tdPy} px-2 border-r border-slate-100/50 bg-slate-50/50 text-slate-500 font-bold text-left tracking-wide`}>{day.slice(0, 3)}</td>
+                            <tr key={day} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                <td className={`${tdPy} px-2 border-r border-slate-100 bg-slate-50/50 text-slate-500 font-bold text-left tracking-wide`}>{day.slice(0, 3)}</td>
                                 {PERIODS.map(period => {
                                     const slot = getSlot(day, period);
 
@@ -135,12 +146,12 @@ const MiniGrid = memo(function MiniGrid({ className, slots, previewChain, large 
                                     return (
                                         <td key={period} className={`${tdPy} px-1 border-r border-slate-100/30 relative`}>
                                             {previewMoveHere ? (
-                                                <div className="absolute inset-1 border-2 border-brand-400 border-dashed rounded-lg bg-brand-50/90 animate-pulse flex flex-col justify-center items-center z-10 shadow-inner">
-                                                    <span className={`font-black text-brand-700 ${textSzSmall} leading-tight drop-shadow-sm`}>{previewMoveHere.subject}</span>
+                                                <div className="absolute inset-1 border-2 border-brand-400 border-dashed rounded-lg bg-indigo-500/10/90 animate-pulse flex flex-col justify-center items-center z-10 shadow-inner">
+                                                    <span className={`font-black text-indigo-600 ${textSzSmall} leading-tight drop-shadow-sm`}>{previewMoveHere.subject}</span>
                                                 </div>
                                             ) : null}
                                             {slot ? (
-                                                <div className={`rounded-lg ${textSzSmall} px-1 ${tdPy} font-extrabold text-slate-700 leading-tight ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-slate-100 border border-slate-200'} shadow-sm ${previewMoveOut ? 'opacity-20 grayscale scale-90 transition-all' : ''}`}>
+                                                <div className={`rounded-lg ${textSzSmall} px-1 ${tdPy} font-extrabold text-slate-800 leading-tight ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-slate-100 border border-slate-200'} shadow-sm ${previewMoveOut ? 'opacity-20 grayscale scale-90 transition-all' : ''}`}>
                                                     {slot.subject}
                                                 </div>
                                             ) : (
@@ -174,7 +185,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
         if (!conflict) return;
         setAlternatives(null);
         setAltError(false);
-        fetch(`${API}/api/suggest-alternatives`, {
+        authFetch(`${API}/api/suggest-alternatives`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -195,7 +206,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
         if (cascades) return; // already fetched
 
         setCascadeError(false);
-        fetch(`${API}/api/find-cascade`, {
+        authFetch(`${API}/api/find-cascade`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -219,7 +230,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-end p-6 pointer-events-none">
             <div
-                className="bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.3)] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-gray-200"
+                className="bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.3)] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-slate-200"
                 style={{ animation: 'popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}
             >
                 {/* ── Header ── */}
@@ -236,7 +247,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
 
                     {/* Conflict messages */}
                     <div>
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Conflicts Detected</p>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Conflicts Detected</p>
                         <div className="space-y-2">
                             {conflict.messages.map((msg, i) => (
                                 <div key={i} className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
@@ -248,16 +259,16 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                     </div>
 
                     {/* Tabs */}
-                    <div className="flex border-b border-gray-200 mt-2">
+                    <div className="flex border-b border-slate-200 mt-2">
                         <button
                             onClick={() => setActiveTab('alternatives')}
-                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeTab === 'alternatives' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeTab === 'alternatives' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-gray-600'}`}
                         >
                             Alternatives (1-step)
                         </button>
                         <button
                             onClick={() => setActiveTab('cascade')}
-                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'cascade' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'cascade' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-gray-600'}`}
                         >
                             Smart Resolve (Multi-step)
                             <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide font-black">New</span>
@@ -268,8 +279,8 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                     {activeTab === 'alternatives' && (
                         <div>
                             {!alternatives && !altError && (
-                                <div className="flex items-center gap-2 text-gray-400 text-sm py-3">
-                                    <div className="w-4 h-4 border-2 border-gray-200 border-t-indigo-500 rounded-full animate-spin" />
+                                <div className="flex items-center gap-2 text-slate-400 text-sm py-3">
+                                    <div className="w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
                                     Computing collision-free slots…
                                 </div>
                             )}
@@ -277,20 +288,20 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                             {altError && <p className="text-red-500 text-sm">Could not compute alternatives.</p>}
 
                             {alternatives && !hasAlternatives && (
-                                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-500">
+                                <div className="bg-gray-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-500">
                                     No simple 1-step moves available. Try <strong>Smart Resolve</strong>.
                                 </div>
                             )}
 
                             {alternatives?.safeEmptySlots?.length > 0 && (
                                 <div className="mb-4">
-                                    <p className="text-xs text-emerald-700 font-semibold mb-2">● Move to empty slot</p>
+                                    <p className="text-xs text-emerald-600 font-semibold mb-2">● Move to empty slot</p>
                                     <div className="flex flex-wrap gap-2">
                                         {alternatives.safeEmptySlots.map(({ day, period }) => (
                                             <button
                                                 key={`${day}-${period}`}
                                                 onClick={() => onSelectAlternative({ type: 'move', day, period })}
-                                                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg transition-colors"
+                                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 text-white text-xs font-bold rounded-lg transition-colors"
                                             >
                                                 {DAY_ABBREV[day]} P{period}
                                             </button>
@@ -310,13 +321,13 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                                                 className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl text-left transition-colors group"
                                             >
                                                 <div className="flex items-center gap-2">
-                                                    <span className={`px-2.5 py-1 rounded-md border text-xs font-bold text-gray-800 ${alt.color || 'bg-gray-100'}`}>
+                                                    <span className={`px-2.5 py-1 rounded-md border text-xs font-bold text-gray-800 ${alt.color || 'bg-white'}`}>
                                                         {alt.subject}
                                                     </span>
-                                                    <span className="text-gray-500 text-xs">{alt.teacher}</span>
+                                                    <span className="text-slate-500 text-xs">{alt.teacher}</span>
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0">
-                                                    <span className="text-xs text-gray-400">{DAY_ABBREV[alt.day]} P{alt.period}</span>
+                                                    <span className="text-xs text-slate-400">{DAY_ABBREV[alt.day]} P{alt.period}</span>
                                                     <span className="text-xs bg-blue-100 group-hover:bg-blue-200 text-blue-700 font-bold px-2 py-0.5 rounded-lg transition-colors">Swap ⇄</span>
                                                 </div>
                                             </button>
@@ -331,8 +342,8 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                     {activeTab === 'cascade' && (
                         <div>
                             {!cascades && !cascadeError && (
-                                <div className="flex items-center gap-2 text-gray-400 text-sm py-3">
-                                    <div className="w-4 h-4 border-2 border-gray-200 border-t-indigo-500 rounded-full animate-spin" />
+                                <div className="flex items-center gap-2 text-slate-400 text-sm py-3">
+                                    <div className="w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
                                     Searching across all classes for resolution chains…
                                 </div>
                             )}
@@ -346,14 +357,14 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                             )}
 
                             {cascades?.chains?.length === 0 && !cascades.blocked && (
-                                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-500">
+                                <div className="bg-gray-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-500">
                                     Could not find any safe multi-step resolution within 3 moves.
                                 </div>
                             )}
 
                             {cascades?.chains?.length > 0 && (
                                 <div className="space-y-4">
-                                    <p className="text-xs font-medium text-gray-500">
+                                    <p className="text-xs font-medium text-slate-500">
                                         Found {cascades.chains.length} way(s) to resolve this collision by cascading moves.
                                     </p>
                                     <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
@@ -378,10 +389,10 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                                                         <div key={mIdx} className="flex items-center gap-2 text-[11px] bg-white border border-gray-100 rounded-lg px-2.5 py-1.5 shadow-sm">
                                                             <span className="flex-1 truncate">
                                                                 <span className="font-bold text-gray-800">Class {move.className}:</span>{' '}
-                                                                <span className="font-semibold text-gray-700">{move.subject}</span>
+                                                                <span className="font-semibold text-slate-800">{move.subject}</span>
                                                             </span>
-                                                            <span className="text-gray-400 shrink-0">
-                                                                {DAY_ABBREV[move.fromDay]} P{move.fromPeriod} <strong className="text-indigo-400 mx-1">→</strong> {DAY_ABBREV[move.toDay]} P{move.toPeriod}
+                                                            <span className="text-slate-400 shrink-0">
+                                                                {DAY_ABBREV[move.fromDay]} P{move.fromPeriod} <strong className="text-indigo-600 mx-1">→</strong> {DAY_ABBREV[move.toDay]} P{move.toPeriod}
                                                             </span>
                                                         </div>
                                                     ))}
@@ -399,7 +410,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                 <div className="flex gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50 shrink-0">
                     <button
                         onClick={() => { onPreviewChain && onPreviewChain(null); onCancel(); }}
-                        className="flex-1 py-2.5 bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 font-bold text-sm rounded-xl transition-colors"
+                        className="flex-1 py-2.5 bg-white border border-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-xl transition-colors"
                     >
                         Cancel
                     </button>
@@ -443,6 +454,10 @@ export default function TimetableGrid({ projectId }) {
     const [validSlots, setValidSlots] = useState({});
     const [previewChain, setPreviewChain] = useState(null);
     const [justMovedIds, setJustMovedIds] = useState([]);
+    const [showExportModal, setShowExportModal] = useState(false);
+    const tableRef = useRef(null);
+    const overlayRef = useRef(null);
+    const dragHandlerRef = useRef(null);
 
     const showToast = (message, type = 'info') => setToast({ message, type });
     const clearToast = useCallback(() => setToast({ message: '', type: 'info' }), []);
@@ -455,8 +470,8 @@ export default function TimetableGrid({ projectId }) {
         if (!projectId) return;
         setLoading(true);
         Promise.all([
-            fetch(`${API}/api/classes?projectId=${projectId}`).then(r => r.json()),
-            fetch(`${API}/api/schedule?projectId=${projectId}`).then(r => r.json()),
+            authFetch(`${API}/api/classes?projectId=${projectId}`).then(r => r.json()),
+            authFetch(`${API}/api/schedule?projectId=${projectId}`).then(r => r.json()),
         ])
             .then(([classNames, schedules]) => {
                 setClasses(classNames);
@@ -472,7 +487,7 @@ export default function TimetableGrid({ projectId }) {
     const handleSave = async () => {
         setSaving(true);
         try {
-            const resp = await fetch(`${API}/api/schedule/save`, {
+            const resp = await authFetch(`${API}/api/schedule/save`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ allSchedules, projectId })
@@ -494,7 +509,7 @@ export default function TimetableGrid({ projectId }) {
             async () => {
                 setRegenerating(true);
                 try {
-                    const resp = await fetch(`${API}/api/schedule/regenerate`, {
+                    const resp = await authFetch(`${API}/api/schedule/regenerate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ projectId })
@@ -610,11 +625,42 @@ export default function TimetableGrid({ projectId }) {
         setJustMovedIds(chain.map(m => m.blockId));
         setTimeout(() => setJustMovedIds([]), 4000);
     };
-    const handleDragStart = (event) => {
-        const { active } = event;
-        const draggedBlock = currentSchedule.find(s => s.id === active.id);
-        if (!draggedBlock) return;
+    // Called when a block starts being dragged (from DraggableBlock's onDragStart)
+    const handleDragStart = (draggedBlock) => {
+        if (!draggedBlock) {
+            // Tear down global listener
+            if (dragHandlerRef.current) {
+                document.removeEventListener('dragover', dragHandlerRef.current);
+                dragHandlerRef.current = null;
+            }
+            if (overlayRef.current) overlayRef.current.style.display = 'none';
+            setDraggedItem(null);
+            setValidSlots({});
+            return;
+        }
 
+        // Prime the overlay with this slot's color & text (direct DOM = zero re-render)
+        if (overlayRef.current) {
+            const colorCls = draggedBlock.color || 'bg-blue-100 border-blue-200';
+            overlayRef.current.className =
+                `pointer-events-none absolute top-0 left-0 z-50 rounded-xl p-2 flex flex-col justify-center items-center shadow-2xl ring-2 ring-brand-400/40 border opacity-95 ${colorCls}`;
+            const spans = overlayRef.current.querySelectorAll('span');
+            if (spans[0]) spans[0].textContent = draggedBlock.subject;
+            if (spans[1]) spans[1].textContent = draggedBlock.teacher;
+        }
+
+        // Global dragover — fires even when mouse is outside the table
+        const handler = (e) => {
+            if (!tableRef.current || !overlayRef.current) return;
+            const rect = tableRef.current.getBoundingClientRect();
+            const OW = 130, OH = 84;
+            const x = Math.min(Math.max(e.clientX - rect.left - OW / 2, 0), rect.width - OW);
+            const y = Math.min(Math.max(e.clientY - rect.top - OH / 2, 0), rect.height - OH);
+            overlayRef.current.style.display = 'flex';
+            overlayRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        };
+        dragHandlerRef.current = handler;
+        document.addEventListener('dragover', handler);
         setDraggedItem(draggedBlock);
 
         // Precompute valid slots for this teacher and potential swaps
@@ -667,15 +713,11 @@ export default function TimetableGrid({ projectId }) {
         setValidSlots(newValid);
     };
 
-    const handleDragEnd = async (event) => {
+    // Called when a block is dropped onto a cell (from DroppableCell's onDrop)
+    const handleDrop = async (draggedBlockId, newDay, newPeriod) => {
         setDraggedItem(null);
         setValidSlots({});
-        const { active, over } = event;
-        if (!over) return;
 
-        const draggedBlockId = active.id;
-        const newDay = over.data.current.day;
-        const newPeriod = over.data.current.period;
         const draggedBlock = currentSchedule.find(s => s.id === draggedBlockId);
         if (!draggedBlock) return;
 
@@ -698,7 +740,7 @@ export default function TimetableGrid({ projectId }) {
                 // Leg 1: draggedBlock.teacher moves to occupant's slot (newDay, newPeriod)
                 // Leg 2: occupant.teacher moves to draggedBlock's original slot
                 const [leg1, leg2] = await Promise.all([
-                    fetch(`${API}/api/validate-move`, {
+                    authFetch(`${API}/api/validate-move`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -709,7 +751,7 @@ export default function TimetableGrid({ projectId }) {
                             allSchedules: tempAllSchedules,
                         }),
                     }).then(r => r.json()),
-                    fetch(`${API}/api/validate-move`, {
+                    authFetch(`${API}/api/validate-move`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -767,7 +809,7 @@ export default function TimetableGrid({ projectId }) {
             const tempSchedule = currentSchedule.filter(s => s.id !== draggedBlockId);
             const tempAllSchedules = { ...allSchedules, [selectedClass]: tempSchedule };
 
-            const resp = await fetch(`${API}/api/validate-move`, {
+            const resp = await authFetch(`${API}/api/validate-move`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -829,7 +871,7 @@ export default function TimetableGrid({ projectId }) {
     };
 
     const totalFilled = currentSchedule.length;
-    const totalEmpty = 40 - totalFilled;
+    const totalEmpty = 35 - totalFilled;
 
     return (
         <>
@@ -876,7 +918,7 @@ export default function TimetableGrid({ projectId }) {
                 {/* ── Header ── */}
                 <div className="flex flex-wrap items-center justify-between gap-6 mb-8">
                     <div>
-                        <h2 className="text-4xl font-black text-slate-900 tracking-tight drop-shadow-sm">
+                        <h2 className="text-4xl font-black text-slate-800 tracking-tight drop-shadow-sm">
                             {view === 'all'
                                 ? 'All Classes — Overview'
                                 : viewMode === 'teacher'
@@ -887,7 +929,7 @@ export default function TimetableGrid({ projectId }) {
                         <p className="text-slate-500 font-bold text-sm mt-1.5 uppercase tracking-wider">
                             {view === 'single'
                                 ? viewMode === 'class'
-                                    ? `${totalFilled}/40 slots filled · ${totalEmpty} empty`
+                                    ? `${totalFilled}/35 slots filled · ${totalEmpty} empty`
                                     : `${teacherSchedule.length}/40 slots teaching`
                                 : `${classes.length} classes · AI-Generated, Collision-Free`
                             }
@@ -899,11 +941,10 @@ export default function TimetableGrid({ projectId }) {
                         <button
                             onClick={handleUndo}
                             disabled={history.length === 0}
-                            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
-                                history.length > 0
-                                    ? 'bg-white border border-slate-200/60 text-slate-700 hover:bg-slate-50 shadow-sm hover:border-slate-300'
-                                    : 'bg-white/50 border border-transparent text-slate-300 cursor-not-allowed'
-                            }`}
+                            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${history.length > 0
+                                ? 'bg-white border border-slate-200 text-slate-800 hover:bg-white shadow-sm hover:border-white/20'
+                                : 'bg-slate-50 border border-transparent text-slate-300 cursor-not-allowed'
+                                }`}
                             title="Undo last action"
                         >
                             <span>↩</span> Undo
@@ -911,16 +952,16 @@ export default function TimetableGrid({ projectId }) {
 
                         {/* View Toggle */}
                         {view === 'single' && (
-                            <div className="flex bg-slate-100/80 backdrop-blur-sm border border-slate-200/50 rounded-xl p-1 gap-1 mr-2 shadow-inner">
+                            <div className="flex bg-white backdrop-blur-sm border border-slate-200 rounded-xl p-1 gap-1 mr-2 shadow-inner">
                                 <button
                                     onClick={() => setViewMode('class')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'class' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'class' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
                                 >
                                     By Class
                                 </button>
                                 <button
                                     onClick={() => setViewMode('teacher')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'teacher' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'teacher' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
                                 >
                                     By Teacher
                                 </button>
@@ -929,16 +970,16 @@ export default function TimetableGrid({ projectId }) {
 
                         {/* Mode Toggle (Single vs All) */}
                         {viewMode === 'class' && (
-                            <div className="flex bg-slate-100/80 backdrop-blur-sm border border-slate-200/50 rounded-xl p-1 gap-1 shadow-inner">
+                            <div className="flex bg-white backdrop-blur-sm border border-slate-200 rounded-xl p-1 gap-1 shadow-inner">
                                 <button
                                     onClick={() => setView('single')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'single' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'single' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
                                 >
                                     Single Class
                                 </button>
                                 <button
                                     onClick={() => setView('all')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'all' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
+                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'all' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
                                 >
                                     All Classes
                                 </button>
@@ -950,7 +991,7 @@ export default function TimetableGrid({ projectId }) {
                             <select
                                 value={selectedClass}
                                 onChange={e => setSelectedClass(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-4 py-2 text-sm font-semibold text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="border border-slate-200 rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                             >
                                 {classes.map(cls => (
                                     <option key={cls} value={cls}>Class {cls}</option>
@@ -962,7 +1003,7 @@ export default function TimetableGrid({ projectId }) {
                             <select
                                 value={selectedTeacher}
                                 onChange={e => setSelectedTeacher(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-4 py-2 text-sm font-semibold text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="border border-slate-200 rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                             >
                                 {uniqueTeachers.map(t => (
                                     <option key={t} value={t}>{t}</option>
@@ -972,17 +1013,28 @@ export default function TimetableGrid({ projectId }) {
 
                         {/* Validating badge */}
                         {validating && (
-                            <span className="px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-700 text-xs font-bold rounded-lg animate-pulse">
+                            <span className="px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-600 text-xs font-bold rounded-lg animate-pulse">
                                 Validating move…
                             </span>
                         )}
 
                         {/* Persistence Controls */}
-                        <div className="flex items-center gap-2 border-l border-gray-200 pl-3">
+                        <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+                            {/* Export PDF button */}
+                            <button
+                                onClick={() => setShowExportModal(true)}
+                                disabled={Object.keys(allSchedules).length === 0}
+                                className="px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2 bg-white border border-slate-200 text-slate-800 hover:bg-white hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Export PDF
+                            </button>
                             <button
                                 onClick={handleSave}
                                 disabled={!isDirty || saving}
-                                className={`px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2 ${!isDirty && !saving ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' : saving ? 'bg-emerald-600 text-white cursor-not-allowed opacity-80' : 'bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600'}`}
+                                className={`px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2 ${!isDirty && !saving ? 'bg-white text-slate-400 cursor-not-allowed border border-slate-200' : saving ? 'bg-emerald-600 text-white cursor-not-allowed opacity-80' : 'bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600'}`}
                             >
                                 {saving ? (
                                     <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
@@ -998,7 +1050,7 @@ export default function TimetableGrid({ projectId }) {
 
                 {/* ── Loading ── */}
                 {loading && (
-                    <div className="flex items-center justify-center h-64 text-gray-400">
+                    <div className="flex items-center justify-center h-64 text-slate-400">
                         <div className="text-center">
                             <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
                             <p className="font-medium">Loading schedules…</p>
@@ -1008,75 +1060,24 @@ export default function TimetableGrid({ projectId }) {
 
                 {/* ── Single Class Grid (with DnD) ── */}
                 {!loading && view === 'single' && viewMode === 'class' && (
-                    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd} modifiers={[restrictToFirstScrollableAncestor]}>
-                        <div className="glass-card rounded-[32px] shadow-sm overflow-auto">
-                            <table className="w-full text-center border-collapse">
-                                <thead className="sticky top-0 z-20 shadow-sm">
-                                    <tr className="bg-white/80 backdrop-blur-md border-b border-slate-200/50">
-                                        <th className="sticky left-0 z-30 bg-white/90 backdrop-blur-md py-4 px-6 w-32 text-slate-400 font-black text-left text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
-                                        {PERIODS.map(p => (
-                                            <th key={p} className="py-4 px-2 text-slate-700 font-extrabold text-sm w-40">
-                                                Period {p}
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {DAYS.map((day, i) => (
-                                        <tr key={day} className={`border-b border-slate-100/50 ${i % 2 === 0 ? 'bg-white/40' : 'bg-slate-50/30'}`}>
-                                            <td className="sticky left-0 z-10 py-3 px-6 bg-white/60 backdrop-blur-sm text-slate-700 font-black text-base text-left shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
-                                                {day}
-                                            </td>
-                                            {PERIODS.map(period => {
-                                                const slot = getSlotData(day, period);
-                                                const isValid = validSlots[`${day}-${period}`];
-
-                                                // Check preview chain
-                                                let previewMoveHere = null;
-                                                let previewMoveOut = false;
-                                                if (previewChain) {
-                                                    previewMoveHere = previewChain.find(m => m.toDay === day && m.toPeriod === period && m.className === selectedClass);
-                                                    previewMoveOut = previewChain.some(m => m.fromDay === day && m.fromPeriod === period && m.className === selectedClass);
-                                                }
-
-                                                return (
-                                                    <DroppableCell
-                                                        key={`${day}-${period}`}
-                                                        day={day}
-                                                        period={period}
-                                                        isDraggingAny={!!draggedItem}
-                                                        isValid={isValid}
-                                                    >
-                                                        {previewMoveHere ? (
-                                                            <div className="w-full h-full border-2 border-indigo-400 border-dashed rounded-lg p-2 flex flex-col justify-center items-center bg-indigo-50/80 animate-pulse">
-                                                                <span className="font-bold text-indigo-700 text-sm text-center leading-tight">{previewMoveHere.subject}</span>
-                                                                <span className="text-[10px] text-indigo-500 mt-1 text-center font-bold">New</span>
-                                                            </div>
-                                                        ) : (
-                                                            slot && <div className={previewMoveOut ? "opacity-20 grayscale transition-all duration-300 w-full h-full" : "w-full h-full"}>
-                                                                <DraggableBlock slot={slot} onDelete={handleDeleteBlock} justMoved={justMovedIds.includes(slot.id)} />
-                                                            </div>
-                                                        )}
-                                                    </DroppableCell>
-                                                );
-                                            })}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                    <div
+                        ref={tableRef}
+                        className="glass-card rounded-[32px] shadow-sm relative"
+                    >
+                        {/* Custom drag overlay — clamped to table bounds, driven via DOM ref (no re-renders) */}
+                        <div
+                            ref={overlayRef}
+                            style={{ display: 'none', width: 130, height: 84, willChange: 'transform' }}
+                        >
+                            <span className="font-extrabold text-slate-800 text-[13px] text-center leading-tight drop-shadow-sm" />
+                            <span className="text-[10px] text-white/60/80 font-bold mt-0.5 text-center" />
                         </div>
-                    </DndContext>
-                )}
-
-                {/* ── Teacher Grid (Read-Only) ── */}
-                {!loading && view === 'single' && viewMode === 'teacher' && (
-                    <div className="glass-card rounded-[32px] shadow-sm overflow-auto">
-                        <table className="w-full text-center border-collapse">
+                        <table className="w-full text-center table-fixed border-collapse">
                             <thead className="sticky top-0 z-20 shadow-sm">
-                                <tr className="bg-white/80 backdrop-blur-md border-b border-slate-200/50">
-                                    <th className="sticky left-0 z-30 bg-white/90 backdrop-blur-md py-4 px-6 w-32 text-slate-400 font-black text-left text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
+                                <tr className="bg-white backdrop-blur-md border-b border-slate-200">
+                                    <th className="sticky left-0 z-30 bg-slate-50/90 backdrop-blur-md py-4 px-2 w-[10%] text-slate-400 font-black text-center text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
                                     {PERIODS.map(p => (
-                                        <th key={p} className="py-4 px-2 text-slate-700 font-extrabold text-sm w-40">
+                                        <th key={p} className="py-4 px-2 text-slate-800 font-extrabold text-sm w-[12.8%]">
                                             Period {p}
                                         </th>
                                     ))}
@@ -1084,27 +1085,88 @@ export default function TimetableGrid({ projectId }) {
                             </thead>
                             <tbody>
                                 {DAYS.map((day, i) => (
-                                    <tr key={day} className={`border-b border-slate-100/50 ${i % 2 === 0 ? 'bg-white/40' : 'bg-slate-50/30'}`}>
-                                        <td className="sticky left-0 z-10 py-3 px-6 bg-white/60 backdrop-blur-sm text-slate-700 font-black text-base text-left shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
-                                            {day}
+                                    <tr key={day} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}`}>
+                                        <td className="sticky left-0 z-10 py-3 px-2 bg-white backdrop-blur-sm text-slate-800 font-black text-base text-center shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
+                                            {day.slice(0, 3)}
+                                        </td>
+                                        {PERIODS.map(period => {
+                                            const slot = getSlotData(day, period);
+                                            const isValid = validSlots[`${day}-${period}`];
+
+                                            // Check preview chain
+                                            let previewMoveHere = null;
+                                            let previewMoveOut = false;
+                                            if (previewChain) {
+                                                previewMoveHere = previewChain.find(m => m.toDay === day && m.toPeriod === period && m.className === selectedClass);
+                                                previewMoveOut = previewChain.some(m => m.fromDay === day && m.fromPeriod === period && m.className === selectedClass);
+                                            }
+
+                                            return (
+                                                <DroppableCell
+                                                    key={`${day}-${period}`}
+                                                    day={day}
+                                                    period={period}
+                                                    isDraggingAny={!!draggedItem}
+                                                    isValid={isValid}
+                                                    onDrop={handleDrop}
+                                                >
+                                                    {previewMoveHere ? (
+                                                        <div className="w-full h-full border-2 border-indigo-600 border-dashed rounded-lg p-2 flex flex-col justify-center items-center bg-indigo-50/80 animate-pulse">
+                                                            <span className="font-bold text-indigo-700 text-sm text-center leading-tight">{previewMoveHere.subject}</span>
+                                                            <span className="text-[10px] text-indigo-500 mt-1 text-center font-bold">New</span>
+                                                        </div>
+                                                    ) : (
+                                                        slot && <div className={previewMoveOut ? "opacity-20 grayscale transition-all duration-300 w-full h-full" : "w-full h-full"}>
+                                                            <DraggableBlock slot={slot} onDelete={handleDeleteBlock} justMoved={justMovedIds.includes(slot.id)} onDragStart={handleDragStart} />
+                                                        </div>
+                                                    )}
+                                                </DroppableCell>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                {/* ── Teacher Grid (Read-Only) ── */}
+                {!loading && view === 'single' && viewMode === 'teacher' && (
+                    <div className="glass-card rounded-[32px] shadow-sm">
+                        <table className="w-full text-center table-fixed border-collapse">
+                            <thead className="sticky top-0 z-20 shadow-sm">
+                                <tr className="bg-white backdrop-blur-md border-b border-slate-200">
+                                    <th className="sticky left-0 z-30 bg-slate-50/90 backdrop-blur-md py-4 px-2 w-[10%] text-slate-400 font-black text-center text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
+                                    {PERIODS.map(p => (
+                                        <th key={p} className="py-4 px-2 text-slate-800 font-extrabold text-sm w-[12.8%]">
+                                            Period {p}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {DAYS.map((day, i) => (
+                                    <tr key={day} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}`}>
+                                        <td className="sticky left-0 z-10 py-3 px-2 bg-white backdrop-blur-sm text-slate-800 font-black text-base text-center shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
+                                            {day.slice(0, 3)}
                                         </td>
                                         {PERIODS.map(period => {
                                             const slot = getSlotData(day, period);
                                             return (
-                                                <td key={`${day}-${period}`} className="p-1.5 align-top min-w-[140px]">
+                                                <td key={`${day}-${period}`} className="p-1.5 align-top h-24">
                                                     {slot ? (
-                                                        <div className={`p-3 rounded-xl text-left shadow-sm flex flex-col justify-between h-full min-h-[5.5rem] border ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-slate-50 border-slate-200'}`}>
-                                                            <div className="font-black text-[16px] text-slate-900 tracking-tight leading-tight">
+                                                        <div className={`p-3 rounded-xl text-left shadow-sm flex flex-col justify-between h-full min-h-[5.5rem] border ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-white border-slate-200'}`}>
+                                                            <div className="font-black text-[16px] text-slate-800 tracking-tight leading-tight">
                                                                 Class {slot.className}
                                                             </div>
-                                                            <div className="text-[12px] font-extrabold text-brand-700 bg-white/70 px-2 py-1 rounded-lg flex items-center justify-between mt-2 border border-brand-100/50">
+                                                            <div className="text-[12px] font-extrabold text-indigo-600 bg-white/70 px-2 py-1 rounded-lg flex items-center justify-between mt-2 border border-brand-100/50">
                                                                 <span className="truncate drop-shadow-sm" title={slot.subject}>
                                                                     {slot.subject}
                                                                 </span>
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <div className="w-full h-full min-h-[5.5rem] flex items-center justify-center text-slate-300 text-xs font-black tracking-widest uppercase border border-dashed border-slate-200/60 rounded-xl bg-white/20">
+                                                        <div className="w-full h-full min-h-[5.5rem] flex items-center justify-center text-slate-300 text-xs font-black tracking-widest uppercase border border-dashed border-slate-200 rounded-xl bg-white/20">
                                                             Free
                                                         </div>
                                                     )}
@@ -1125,13 +1187,13 @@ export default function TimetableGrid({ projectId }) {
                             .map(subject => ({
                                 subject,
                                 count: currentSchedule.filter(s => s.subject === subject).length,
-                                color: currentSchedule.find(s => s.subject === subject)?.color || 'bg-gray-100'
+                                color: currentSchedule.find(s => s.subject === subject)?.color || 'bg-white'
                             }))
                             .sort((a, b) => b.count - a.count)
                             .map(({ subject, count, color }) => (
-                                <div key={subject} className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold text-gray-700 ${color}`}>
+                                <div key={subject} className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold text-slate-800 ${color}`}>
                                     <span>{subject}</span>
-                                    <span className="bg-white/60 rounded-full px-1.5 py-0.5 text-[10px] font-bold">{count}</span>
+                                    <span className="bg-white rounded-full px-1.5 py-0.5 text-[10px] font-bold">{count}</span>
                                 </div>
                             ))
                         }
@@ -1166,6 +1228,14 @@ export default function TimetableGrid({ projectId }) {
                 }}
                 confirmText={pendingConfirm?.confirmText || "Confirm"}
                 confirmColor={pendingConfirm?.confirmColor || "bg-red-600 hover:bg-red-700 text-white"}
+            />
+
+            <ExportModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                allSchedules={allSchedules}
+                classes={classes}
+                uniqueTeachers={uniqueTeachers}
             />
         </>
     );

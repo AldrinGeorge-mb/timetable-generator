@@ -1,0 +1,349 @@
+import { useState, useCallback, useEffect } from 'react';
+import jsPDF from 'jspdf';
+
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return [
+        parseInt(h.slice(0, 2), 16),
+        parseInt(h.slice(2, 4), 16),
+        parseInt(h.slice(4, 6), 16),
+    ];
+}
+
+const COLOR_MAP = {
+    'bg-red-200':     ['#fecaca', '#f87171'],
+    'bg-blue-200':    ['#bfdbfe', '#60a5fa'],
+    'bg-green-200':   ['#bbf7d0', '#4ade80'],
+    'bg-yellow-200':  ['#fef08a', '#facc15'],
+    'bg-purple-200':  ['#e9d5ff', '#c084fc'],
+    'bg-orange-200':  ['#fed7aa', '#fb923c'],
+    'bg-pink-200':    ['#fbcfe8', '#f472b6'],
+    'bg-teal-200':    ['#99f6e4', '#2dd4bf'],
+    'bg-indigo-200':  ['#c7d2fe', '#818cf8'],
+    'bg-lime-200':    ['#d9f99d', '#a3e635'],
+    'bg-amber-200':   ['#fde68a', '#fbbf24'],
+    'bg-cyan-200':    ['#a5f3fc', '#22d3ee'],
+    'bg-fuchsia-200': ['#f5d0fe', '#e879f9'],
+    'bg-emerald-200': ['#a7f3d0', '#34d399'],
+    'bg-violet-200':  ['#ddd6fe', '#a78bfa'],
+    'bg-rose-200':    ['#fecdd3', '#fb7185'],
+    'bg-sky-200':     ['#bae6fd', '#38bdf8'],
+    'bg-slate-200':   ['#e2e8f0', '#94a3b8'],
+};
+
+function getColors(colorClass) {
+    if (!colorClass) return ['#eff6ff', '#bfdbfe'];
+    const bgKey = colorClass.split(' ').find(c => c.startsWith('bg-'));
+    return COLOR_MAP[bgKey] || ['#eff6ff', '#bfdbfe'];
+}
+
+function buildClassRows(schedule) {
+    const rows = {};
+    DAYS.forEach(d => { rows[d] = {}; });
+    (schedule || []).forEach(s => {
+        const [bg, border] = getColors(s.color);
+        rows[s.day][s.period] = { subject: s.subject, extra: s.teacher, bgColor: bg, borderColor: border };
+    });
+    return rows;
+}
+
+function buildTeacherRows(allSchedules, teacher) {
+    const rows = {};
+    DAYS.forEach(d => { rows[d] = {}; });
+    Object.entries(allSchedules).forEach(([cls, slots]) => {
+        (slots || []).filter(s => s.teacher === teacher).forEach(s => {
+            const [bg, border] = getColors(s.color);
+            rows[s.day][s.period] = { subject: s.subject, extra: `Class ${cls}`, bgColor: bg, borderColor: border };
+        });
+    });
+    return rows;
+}
+
+// ─── Core PDF Drawing (pure jsPDF — zero DOM, near-instant) ──────────────────
+function drawTimetablePage(pdf, title, subtitle, rows, isFirst) {
+    const PW = 297, PH = 210, M = 8;
+    const HEADER_H = 20;
+    const TABLE_TOP = M + HEADER_H + 4;
+    const TABLE_W = PW - 2 * M;
+    const DAY_COL_W = 18;
+    const PERIOD_COL_W = (TABLE_W - DAY_COL_W) / 7;
+    const THEAD_H = 9;
+    const DATA_ROW_H = (PH - TABLE_TOP - M - THEAD_H) / 5;
+
+    if (!isFirst) pdf.addPage();
+
+    // ── Header bar ──
+    pdf.setFillColor(79, 70, 229);        // indigo-600
+    pdf.roundedRect(M, M, PW - 2 * M, HEADER_H, 3, 3, 'F');
+
+    // Accent stripe inside header
+    pdf.setFillColor(99, 102, 241);       // indigo-500 lighter
+    pdf.roundedRect(M, M + HEADER_H - 4, PW - 2 * M, 4, 0, 0, 'F');
+
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(15);
+    pdf.text(title, M + 7, M + 9);
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(199, 210, 254);      // indigo-200
+    pdf.text(subtitle, M + 7, M + 16);
+
+    const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    pdf.text(`Generated ${dateStr}`, PW - M - 3, M + 9, { align: 'right' });
+
+    // ── Table header row ──
+    pdf.setFillColor(241, 245, 249);      // slate-100
+    pdf.rect(M, TABLE_TOP, TABLE_W, THEAD_H, 'F');
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(100, 116, 139);      // slate-500
+
+    pdf.text('Day', M + DAY_COL_W / 2, TABLE_TOP + 5.8, { align: 'center' });
+    for (let p = 0; p < 7; p++) {
+        const cx = M + DAY_COL_W + p * PERIOD_COL_W + PERIOD_COL_W / 2;
+        pdf.text(`Period ${p + 1}`, cx, TABLE_TOP + 5.8, { align: 'center' });
+    }
+
+    // ── Data rows ──
+    DAYS.forEach((day, di) => {
+        const rowY = TABLE_TOP + THEAD_H + di * DATA_ROW_H;
+
+        // Alternating row background
+        pdf.setFillColor(di % 2 === 0 ? 255 : 248, di % 2 === 0 ? 255 : 250, di % 2 === 0 ? 255 : 252);
+        pdf.rect(M, rowY, TABLE_W, DATA_ROW_H, 'F');
+
+        // Day label
+        pdf.setTextColor(71, 85, 105);    // slate-600
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(9);
+        pdf.text(day.slice(0, 3), M + DAY_COL_W / 2, rowY + DATA_ROW_H / 2 + 1.5, { align: 'center' });
+
+        // Period cells
+        for (let p = 1; p <= 7; p++) {
+            const slot = rows[day]?.[p];
+            const cx = M + DAY_COL_W + (p - 1) * PERIOD_COL_W + 1.5;
+            const cy = rowY + 2;
+            const cw = PERIOD_COL_W - 3;
+            const ch = DATA_ROW_H - 4;
+
+            if (slot) {
+                // Card fill + border
+                pdf.setFillColor(...hexToRgb(slot.bgColor));
+                pdf.setDrawColor(...hexToRgb(slot.borderColor));
+                pdf.setLineWidth(0.35);
+                pdf.roundedRect(cx, cy, cw, ch, 2, 2, 'FD');
+
+                // Subject
+                pdf.setTextColor(30, 41, 59);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(7.8);
+                pdf.text(slot.subject, cx + cw / 2, cy + ch / 2 + (slot.extra ? -1.5 : 1), {
+                    align: 'center', maxWidth: cw - 2,
+                });
+
+                // Extra (teacher name / class)
+                if (slot.extra) {
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(6.2);
+                    pdf.setTextColor(100, 116, 139);
+                    pdf.text(slot.extra, cx + cw / 2, cy + ch / 2 + 3.5, {
+                        align: 'center', maxWidth: cw - 2,
+                    });
+                }
+            } else {
+                // Empty cell dot
+                pdf.setTextColor(203, 213, 225);
+                pdf.setFont('helvetica', 'normal');
+                pdf.setFontSize(16);
+                pdf.text('·', cx + cw / 2, cy + ch / 2 + 2, { align: 'center' });
+            }
+        }
+    });
+
+    // ── Grid lines ──
+    const tableH = THEAD_H + 5 * DATA_ROW_H;
+    pdf.setDrawColor(226, 232, 240);      // slate-200
+    pdf.setLineWidth(0.2);
+
+    // Outer border
+    pdf.rect(M, TABLE_TOP, TABLE_W, tableH, 'S');
+
+    // Vertical dividers
+    pdf.setDrawColor(226, 232, 240);
+    pdf.line(M + DAY_COL_W, TABLE_TOP, M + DAY_COL_W, TABLE_TOP + tableH);
+    for (let p = 1; p < 7; p++) {
+        const x = M + DAY_COL_W + p * PERIOD_COL_W;
+        pdf.line(x, TABLE_TOP, x, TABLE_TOP + tableH);
+    }
+
+    // Horizontal dividers
+    pdf.setDrawColor(203, 213, 225);
+    pdf.line(M, TABLE_TOP + THEAD_H, M + TABLE_W, TABLE_TOP + THEAD_H);
+    for (let r = 1; r < 5; r++) {
+        const y = TABLE_TOP + THEAD_H + r * DATA_ROW_H;
+        pdf.line(M, y, M + TABLE_W, y);
+    }
+
+    // Day column right border (slightly darker)
+    pdf.setDrawColor(148, 163, 184);
+    pdf.setLineWidth(0.4);
+    pdf.line(M + DAY_COL_W, TABLE_TOP, M + DAY_COL_W, TABLE_TOP + tableH);
+}
+
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+export default function ExportModal({ isOpen, onClose, allSchedules, classes, uniqueTeachers }) {
+    const [mode, setMode] = useState('class');
+    const [selected, setSelected] = useState([]);
+    const [generating, setGenerating] = useState(false);
+
+    const items = mode === 'class' ? classes : uniqueTeachers;
+
+    useEffect(() => { setSelected([...items]); }, [mode, isOpen]);
+
+    const toggleItem = item => setSelected(p => p.includes(item) ? p.filter(i => i !== item) : [...p, item]);
+    const selectAll = () => setSelected([...items]);
+    const deselectAll = () => setSelected([]);
+
+    const handleDownload = useCallback(() => {
+        if (selected.length === 0 || generating) return;
+        setGenerating(true);
+
+        // Yield to UI for the spinner to render, then generate
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                try {
+                    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+                    selected.forEach((item, i) => {
+                        const rows = mode === 'class'
+                            ? buildClassRows(allSchedules[item])
+                            : buildTeacherRows(allSchedules, item);
+                        const title = mode === 'class' ? `Class ${item} — Timetable` : `${item} — Teaching Schedule`;
+                        const subtitle = mode === 'class'
+                            ? `Weekly schedule for Class ${item}`
+                            : `Periods taught across all classes`;
+                        drawTimetablePage(pdf, title, subtitle, rows, i === 0);
+                    });
+
+                    const filename = `timetable_${mode}_${selected.join('-')}.pdf`;
+                    pdf.save(filename);
+                } finally {
+                    setGenerating(false);
+                }
+            }, 20); // tiny delay lets React paint the spinner
+        });
+    }, [selected, mode, allSchedules, generating]);
+
+    if (!isOpen) return null;
+
+    return (
+        <>
+            {/* Backdrop */}
+            <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-6">
+                <div
+                    className="bg-white/90 backdrop-blur-xl border border-white rounded-[32px] shadow-[0_24px_80px_rgba(0,0,0,0.15)] w-full max-w-2xl flex flex-col overflow-hidden"
+                    style={{ animation: 'popIn 0.35s cubic-bezier(0.16,1,0.3,1)' }}
+                >
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-brand-600 to-indigo-500 px-8 py-6 flex items-center justify-between shrink-0">
+                        <div>
+                            <h2 className="text-white font-black text-2xl tracking-tight">Export as PDF</h2>
+                            <p className="text-indigo-100 text-sm mt-1 font-medium">Select what to include in the export</p>
+                        </div>
+                        <button onClick={onClose} className="w-10 h-10 rounded-2xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div className="p-8 flex flex-col gap-6 overflow-y-auto">
+                        {/* Mode toggle */}
+                        <div>
+                            <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-3">Export Type</p>
+                            <div className="flex bg-slate-100/80 border border-slate-200/50 rounded-2xl p-1.5 gap-1.5 shadow-inner">
+                                {['class', 'teacher'].map(m => (
+                                    <button key={m} onClick={() => setMode(m)}
+                                        className={`flex-1 py-3 rounded-xl text-sm font-black transition-all duration-200 ${mode === m ? 'bg-white shadow-md text-brand-700' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}>
+                                        {m === 'class' ? '🏫 Class-wise' : '👨‍🏫 Teacher-wise'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Selection */}
+                        <div>
+                            <div className="flex items-center justify-between mb-3">
+                                <p className="text-slate-500 text-xs font-black uppercase tracking-widest">
+                                    Select {mode === 'class' ? 'Classes' : 'Teachers'}
+                                    <span className="ml-2 text-brand-600 normal-case font-extrabold">({selected.length}/{items.length})</span>
+                                </p>
+                                <div className="flex gap-2">
+                                    <button onClick={selectAll} className="text-xs font-black text-brand-600 hover:text-brand-700 px-3 py-1.5 rounded-xl hover:bg-brand-50 transition-colors">Select All</button>
+                                    <button onClick={deselectAll} className="text-xs font-black text-slate-400 hover:text-slate-600 px-3 py-1.5 rounded-xl hover:bg-slate-100 transition-colors">Deselect All</button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
+                                {items.map(item => {
+                                    const on = selected.includes(item);
+                                    return (
+                                        <button key={item} onClick={() => toggleItem(item)}
+                                            className={`px-4 py-3 rounded-2xl text-sm font-black text-left transition-all duration-150 border ${on ? 'bg-brand-50 border-brand-300 text-brand-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}>
+                                            <span className="mr-2">{on ? '✓' : '○'}</span>
+                                            {mode === 'class' ? `Class ${item}` : item}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex items-start gap-3 bg-indigo-50 border border-indigo-200/60 rounded-2xl px-5 py-4">
+                            <svg className="w-5 h-5 text-indigo-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-indigo-700 text-sm font-medium leading-relaxed">
+                                <strong>A4 Landscape</strong> — one page per {mode === 'class' ? 'class' : 'teacher'}, with colour-coded subject blocks. PDF is generated instantly as a vector document.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-8 py-5 border-t border-slate-100 bg-white/60 flex items-center justify-end gap-4 shrink-0">
+                        <button onClick={onClose} disabled={generating}
+                            className="px-6 py-3 bg-white border border-slate-200 text-slate-600 text-sm font-black rounded-2xl hover:bg-slate-50 transition-all disabled:opacity-40">
+                            Cancel
+                        </button>
+                        <button onClick={handleDownload} disabled={selected.length === 0 || generating}
+                            className={`px-7 py-3 text-sm font-black rounded-2xl transition-all duration-200 flex items-center gap-2.5 shadow-lg ${selected.length > 0 && !generating ? 'bg-gradient-to-r from-brand-600 to-indigo-500 text-white hover:shadow-xl hover:-translate-y-0.5' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}>
+                            {generating ? (
+                                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating…</>
+                            ) : (
+                                <>
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    Download PDF ({selected.length} {mode === 'class' ? (selected.length === 1 ? 'class' : 'classes') : (selected.length === 1 ? 'teacher' : 'teachers')})
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <style>{`
+                @keyframes popIn {
+                    from { opacity: 0; transform: scale(0.92) translateY(16px); }
+                    to   { opacity: 1; transform: scale(1) translateY(0); }
+                }
+            `}</style>
+        </>
+    );
+}

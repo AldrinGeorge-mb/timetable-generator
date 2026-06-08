@@ -50,7 +50,7 @@ function generateTimetable(allClasses) {
         remainingRequirements: currentClass.requirements.map(req => ({ ...req, remaining: req.periodsPerWeek })),
         schedule: [],
         subjectColors: {},
-        colorIndex: 0
+        colorIndex: Math.floor(Math.random() * COLOR_PALETTE.length)
     }));
 
     DAYS.forEach(day => {
@@ -58,7 +58,8 @@ function generateTimetable(allClasses) {
             
             // Phase 1: If it's Period 1, let all classes try to book their Class Teacher FIRST
             if (period === 1) {
-                classStates.forEach(cState => {
+                const shuffledPhase1 = [...classStates].sort(() => Math.random() - 0.5);
+                shuffledPhase1.forEach(cState => {
                     if (cState.classTeacher) {
                         const ctReq = cState.remainingRequirements.find(r => r.teacher === cState.classTeacher);
                         if (ctReq && ctReq.remaining > 0 && isTeacherGloballyFree(ctReq.teacher, day, period)) {
@@ -85,12 +86,14 @@ function generateTimetable(allClasses) {
             }
 
             // Phase 2: Normal scheduling for any classes that don't have a subject yet for this period
-            classStates.forEach(cState => {
+            const shuffledPhase2 = [...classStates].sort(() => Math.random() - 0.5);
+            shuffledPhase2.forEach(cState => {
                 // Skip if this class already has something scheduled for this day/period (e.g. from Phase 1)
                 const isSlotFilled = cState.schedule.some(s => s.day === day && s.period === period);
                 if (isSlotFilled) return;
 
-                // Sort by remaining periods to prioritize subjects that need more slots
+                // Shuffle first to randomize ties, then sort by remaining periods to prioritize subjects that need more slots
+                cState.remainingRequirements.sort(() => Math.random() - 0.5);
                 cState.remainingRequirements.sort((a, b) => b.remaining - a.remaining);
 
                 const previousPeriod = period - 1;
@@ -113,36 +116,91 @@ function generateTimetable(allClasses) {
                     return count;
                 };
 
-                // Pass 1: Try to find a subject that is NOT adjacent, AND teacher has < 3 continuous periods
+                const dayIndex = DAYS.indexOf(day);
+                const remainingDays = 5 - dayIndex;
+
+                // Check if a subject has already been scheduled in this specific period on a previous day
+                const hasSamePeriodFn = (subject) => cState.schedule.some(s => s.subject === subject && s.period === period);
+
+                // Pass 1: Perfect. Scattered, NOT adjacent, teacher < 3 continuous, AND never placed in this period before.
                 let availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
                     const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
                     const continuousCount = getTeacherContinuousCount(currReq.teacher, day, period);
+                    const idealMaxPerDay = Math.ceil((currReq.remaining + countToday) / remainingDays);
                     return currReq.remaining > 0 &&
                         isTeacherGloballyFree(currReq.teacher, day, period) &&
-                        countToday < 2 &&
+                        countToday < idealMaxPerDay &&
                         currReq.subject !== lastSubject &&
+                        !hasSamePeriodFn(currReq.subject) &&
                         continuousCount < 3;
                 });
 
-                // Pass 2: Relax subject adjacency, but keep teacher continuous < 3
+                // Pass 2: Relax period-uniqueness. Perfect scattered, NOT adjacent, teacher < 3.
                 if (availableSubjectIndex === -1) {
                     availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
                         const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
                         const continuousCount = getTeacherContinuousCount(currReq.teacher, day, period);
+                        const idealMaxPerDay = Math.ceil((currReq.remaining + countToday) / remainingDays);
                         return currReq.remaining > 0 &&
                             isTeacherGloballyFree(currReq.teacher, day, period) &&
-                            countToday < 2 &&
+                            countToday < idealMaxPerDay &&
+                            currReq.subject !== lastSubject &&
                             continuousCount < 3;
                     });
                 }
 
-                // Pass 3 (Fallback): Allow >= 3 continuous periods only if it is needed to prevent an empty slot
+                // Pass 3: Relax subject adjacency. Perfect scattered, teacher < 3.
+                if (availableSubjectIndex === -1) {
+                    availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
+                        const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
+                        const continuousCount = getTeacherContinuousCount(currReq.teacher, day, period);
+                        const idealMaxPerDay = Math.ceil((currReq.remaining + countToday) / remainingDays);
+                        return currReq.remaining > 0 &&
+                            isTeacherGloballyFree(currReq.teacher, day, period) &&
+                            countToday < idealMaxPerDay &&
+                            continuousCount < 3;
+                    });
+                }
+
+                // Pass 4: Relax scattering (allow +1 per day). Teacher < 3.
+                if (availableSubjectIndex === -1) {
+                    availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
+                        const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
+                        const continuousCount = getTeacherContinuousCount(currReq.teacher, day, period);
+                        const idealMaxPerDay = Math.ceil((currReq.remaining + countToday) / remainingDays);
+                        return currReq.remaining > 0 &&
+                            isTeacherGloballyFree(currReq.teacher, day, period) &&
+                            countToday < idealMaxPerDay + 1 &&
+                            continuousCount < 3;
+                    });
+                }
+
+                // Pass 5: Allow >= 3 continuous periods, allow relaxed scattering
+                if (availableSubjectIndex === -1) {
+                    availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
+                        const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
+                        const idealMaxPerDay = Math.ceil((currReq.remaining + countToday) / remainingDays);
+                        return currReq.remaining > 0 &&
+                            isTeacherGloballyFree(currReq.teacher, day, period) &&
+                            countToday < idealMaxPerDay + 1;
+                    });
+                }
+                
+                // Pass 6 (Ultimate Fallback): Just try to fit it in to prevent empty slots, limit to 2 per day if possible
                 if (availableSubjectIndex === -1) {
                     availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
                         const countToday = cState.schedule.filter(s => s.day === day && s.subject === currReq.subject).length;
                         return currReq.remaining > 0 &&
                             isTeacherGloballyFree(currReq.teacher, day, period) &&
-                            countToday < 2;
+                            countToday < 2; 
+                    });
+                }
+                
+                // Pass 7 (Desperation): Anything goes
+                if (availableSubjectIndex === -1) {
+                    availableSubjectIndex = cState.remainingRequirements.findIndex(currReq => {
+                        return currReq.remaining > 0 &&
+                            isTeacherGloballyFree(currReq.teacher, day, period);
                     });
                 }
 

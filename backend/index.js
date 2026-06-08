@@ -4,8 +4,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const { generateTimetable } = require('./utils/generator');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const auth = require('./middleware/auth');
 
 // ─── Models ───────────────────────────────────────────────────────────────────
+const User      = require('./models/User');
 const Project   = require('./models/Project');
 const Teacher   = require('./models/Teacher');
 const Subject   = require('./models/Subject');
@@ -19,283 +23,8 @@ app.use(express.json());
 // ─── DB Connection ─────────────────────────────────────────────────────────────
 mongoose
     .connect(process.env.MONGO_URI || 'mongodb://localhost:27017/autoschedule_pro')
-    .then(async () => {
-        console.log('✅ Connected to MongoDB successfully');
-        await seedDatabase();
-    })
+    .then(() => console.log('✅ Connected to MongoDB successfully'))
     .catch((err) => console.error('⚠️ MongoDB connection error:', err.message));
-
-// ─── Seed ──────────────────────────────────────────────────────────────────────
-async function seedDatabase() {
-    const projectCount = await Project.countDocuments();
-    if (projectCount > 0) {
-        console.log('📦 Projects already exist — skipping seed.');
-        return;
-    }
-
-    console.log('🌱 No projects found — seeding "Depaul" project...');
-
-    // Create the Depaul project
-    const depaul = await Project.create({
-        name: 'Depaul',
-        description: 'Depaul High School Timetable'
-    });
-    const pid = depaul._id;
-
-    await Teacher.deleteMany({ projectId: pid });
-    await Subject.deleteMany({ projectId: pid });
-    await ClassRoom.deleteMany({ projectId: pid });
-    await Timetable.deleteMany({ projectId: pid });
-
-    await Teacher.insertMany([
-        { projectId: pid, name: 'ANN MARY TR',  subjectSpecialization: ['ENG', 'CE'] },
-        { projectId: pid, name: 'CELINE TR',    subjectSpecialization: ['IT'] },
-        { projectId: pid, name: 'BETTY TR',     subjectSpecialization: ['HINDI'] },
-        { projectId: pid, name: 'JITHA TR',     subjectSpecialization: ['MAL', 'MAL/HINDI'] },
-        { projectId: pid, name: 'ANUMOL TR',    subjectSpecialization: ['MATHS'] },
-        { projectId: pid, name: 'EMY TR',       subjectSpecialization: ['ENG', 'CE', 'PHY/ART'] },
-        { projectId: pid, name: 'ANUJA TR',     subjectSpecialization: ['MATHS'] },
-        { projectId: pid, name: 'VINEETHA TR',  subjectSpecialization: ['S.S'] },
-        { projectId: pid, name: 'RENJINI TR',   subjectSpecialization: ['BIO', 'PHYSICS', 'ZOOLOGY'] },
-        { projectId: pid, name: 'SHIJI TR',     subjectSpecialization: ['ENG'] },
-        { projectId: pid, name: 'JOSE SIR',     subjectSpecialization: ['MAL'] },
-        { projectId: pid, name: 'ANU JOSMEI TR',subjectSpecialization: ['PHYSICS'] },
-        { projectId: pid, name: 'DINNY TR',     subjectSpecialization: ['MATHS'] },
-        { projectId: pid, name: 'BEMITHA TR',   subjectSpecialization: ['SCI', 'CHE', 'PHY/ART'] },
-        { projectId: pid, name: 'CHIPPY TR',    subjectSpecialization: ['S.S'] },
-        { projectId: pid, name: 'SHANLEY TR',   subjectSpecialization: ['HINDI', 'MAL/HINDI'] },
-        { projectId: pid, name: 'ASHLY TR',     subjectSpecialization: ['CHE', 'PHY/ART'] },
-        { projectId: pid, name: 'RAVEENA TR',   subjectSpecialization: ['MATHS'] },
-        { projectId: pid, name: 'SRUTHY TR',    subjectSpecialization: ['SCI', 'BOTANY', 'PHY/ART', 'BIO'] },
-        { projectId: pid, name: 'DOMINIC SIR',  subjectSpecialization: ['PT'] },
-        { projectId: pid, name: 'RONEY FR',     subjectSpecialization: ['S.S'] },
-        { projectId: pid, name: 'CHINCHU TR',   subjectSpecialization: ['MAL'] },
-        { projectId: pid, name: 'APARNA TR',    subjectSpecialization: ['ENG'] },
-    ]);
-
-    await Subject.insertMany([
-        { projectId: pid, name: 'ENG' }, { projectId: pid, name: 'IT' }, { projectId: pid, name: 'HINDI' },
-        { projectId: pid, name: 'MAL' }, { projectId: pid, name: 'MATHS' }, { projectId: pid, name: 'S.S' },
-        { projectId: pid, name: 'BIO' }, { projectId: pid, name: 'PHYSICS' }, { projectId: pid, name: 'CHE' },
-        { projectId: pid, name: 'SCI' }, { projectId: pid, name: 'BOTANY' }, { projectId: pid, name: 'ZOOLOGY' },
-        { projectId: pid, name: 'PHY/ART' }, { projectId: pid, name: 'PT' }, { projectId: pid, name: 'CE' },
-        { projectId: pid, name: 'MAL/HINDI' },
-    ]);
-
-    const classData = [
-        {
-            className: '5A',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'RAVEENA TR',  periodsPerWeek: 7 },
-                { subject: 'ENG',     teacher: 'EMY TR',      periodsPerWeek: 6 },
-                { subject: 'MAL',     teacher: 'CHINCHU TR',  periodsPerWeek: 5 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 4 },
-                { subject: 'SCI',     teacher: 'SRUTHY TR',   periodsPerWeek: 4 },
-                { subject: 'S.S',     teacher: 'RONEY FR',    periodsPerWeek: 4 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'SRUTHY TR',   periodsPerWeek: 1 },
-                { subject: 'CE',      teacher: 'EMY TR',      periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '5B',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'RAVEENA TR',  periodsPerWeek: 7 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 5 },
-                { subject: 'ENG',     teacher: 'APARNA TR',   periodsPerWeek: 5 },
-                { subject: 'SCI',     teacher: 'BEMITHA TR',  periodsPerWeek: 4 },
-                { subject: 'S.S',     teacher: 'RONEY FR',    periodsPerWeek: 4 },
-                { subject: 'MAL',     teacher: 'CHINCHU TR',  periodsPerWeek: 4 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 3 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'CE',      teacher: 'ANN MARY TR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'SRUTHY TR',   periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '6A',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUJA TR',    periodsPerWeek: 6 },
-                { subject: 'ENG',     teacher: 'ANN MARY TR', periodsPerWeek: 6 },
-                { subject: 'MAL',     teacher: 'JITHA TR',    periodsPerWeek: 5 },
-                { subject: 'SCI',     teacher: 'BEMITHA TR',  periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'CHIPPY TR',   periodsPerWeek: 5 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 4 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'CE',      teacher: 'ANN MARY TR', periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'BEMITHA TR',  periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '6B',
-            requirements: [
-                { subject: 'SCI',     teacher: 'BEMITHA TR',  periodsPerWeek: 6 },
-                { subject: 'MAL',     teacher: 'JITHA TR',    periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'CHIPPY TR',   periodsPerWeek: 5 },
-                { subject: 'ENG',     teacher: 'ANN MARY TR', periodsPerWeek: 5 },
-                { subject: 'MATHS',   teacher: 'ANUJA TR',    periodsPerWeek: 5 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 4 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'BEMITHA TR',  periodsPerWeek: 1 },
-                { subject: 'CE',      teacher: 'ANN MARY TR', periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '7A',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUMOL TR',   periodsPerWeek: 6 },
-                { subject: 'S.S',     teacher: 'VINEETHA TR', periodsPerWeek: 5 },
-                { subject: 'SCI',     teacher: 'BEMITHA TR',  periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JITHA TR',    periodsPerWeek: 5 },
-                { subject: 'ENG',     teacher: 'EMY TR',      periodsPerWeek: 5 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'CE',      teacher: 'EMY TR',      periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'ASHLY TR',    periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '7B',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUMOL TR',   periodsPerWeek: 6 },
-                { subject: 'ENG',     teacher: 'EMY TR',      periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'VINEETHA TR', periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JITHA TR',    periodsPerWeek: 5 },
-                { subject: 'SCI',     teacher: 'BEMITHA TR',  periodsPerWeek: 5 },
-                { subject: 'HINDI',   teacher: 'BETTY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'CE',      teacher: 'EMY TR',      periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'ASHLY TR',    periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '8A',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUMOL TR',   periodsPerWeek: 6 },
-                { subject: 'S.S',     teacher: 'VINEETHA TR', periodsPerWeek: 5 },
-                { subject: 'ENG',     teacher: 'ANN MARY TR', periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',    periodsPerWeek: 4 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',  periodsPerWeek: 3 },
-                { subject: 'PHYSICS', teacher: 'RENJINI TR',  periodsPerWeek: 2 },
-                { subject: 'CHE',     teacher: 'BEMITHA TR',  periodsPerWeek: 2 },
-                { subject: 'BIO',     teacher: 'SRUTHY TR',   periodsPerWeek: 2 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'CE',      teacher: 'ANN MARY TR', periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'EMY TR',      periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '8B',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUMOL TR',   periodsPerWeek: 6 },
-                { subject: 'ENG',     teacher: 'ANN MARY TR', periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'CHIPPY TR',   periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',    periodsPerWeek: 4 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',  periodsPerWeek: 3 },
-                { subject: 'PHYSICS', teacher: 'RENJINI TR',  periodsPerWeek: 2 },
-                { subject: 'CHE',     teacher: 'BEMITHA TR',  periodsPerWeek: 2 },
-                { subject: 'BIO',     teacher: 'SRUTHY TR',   periodsPerWeek: 2 },
-                { subject: 'IT',      teacher: 'CELINE TR',   periodsPerWeek: 2 },
-                { subject: 'CE',      teacher: 'ANN MARY TR', periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR', periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'EMY TR',      periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '9A',
-            requirements: [
-                { subject: 'ENG',     teacher: 'SHIJI TR',      periodsPerWeek: 6 },
-                { subject: 'MATHS',   teacher: 'DINNY TR',      periodsPerWeek: 6 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',      periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'CHIPPY TR',     periodsPerWeek: 5 },
-                { subject: 'PHYSICS', teacher: 'ANU JOSMEI TR', periodsPerWeek: 3 },
-                { subject: 'CHE',     teacher: 'ASHLY TR',      periodsPerWeek: 3 },
-                { subject: 'BIO',     teacher: 'RENJINI TR',    periodsPerWeek: 3 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',     periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR',   periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'SRUTHY TR',     periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '9B',
-            requirements: [
-                { subject: 'ENG',     teacher: 'EMY TR',        periodsPerWeek: 6 },
-                { subject: 'MATHS',   teacher: 'DINNY TR',      periodsPerWeek: 6 },
-                { subject: 'S.S',     teacher: 'CHIPPY TR',     periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',      periodsPerWeek: 5 },
-                { subject: 'BIO',     teacher: 'RENJINI TR',    periodsPerWeek: 3 },
-                { subject: 'PHYSICS', teacher: 'ANU JOSMEI TR', periodsPerWeek: 3 },
-                { subject: 'CHE',     teacher: 'ASHLY TR',      periodsPerWeek: 3 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',     periodsPerWeek: 2 },
-                { subject: 'PT',      teacher: 'DOMINIC SIR',   periodsPerWeek: 1 },
-                { subject: 'PHY/ART', teacher: 'SRUTHY TR',     periodsPerWeek: 1 },
-            ]
-        },
-        {
-            className: '10A',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUJA TR',      periodsPerWeek: 7 },
-                { subject: 'ENG',     teacher: 'SHIJI TR',      periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',      periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'VINEETHA TR',   periodsPerWeek: 5 },
-                { subject: 'PHYSICS', teacher: 'ANU JOSMEI TR', periodsPerWeek: 3 },
-                { subject: 'CHE',     teacher: 'ASHLY TR',      periodsPerWeek: 3 },
-                { subject: 'BIO',     teacher: 'RENJINI TR',    periodsPerWeek: 3 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',     periodsPerWeek: 2 },
-            ]
-        },
-        {
-            className: '10B',
-            requirements: [
-                { subject: 'MATHS',   teacher: 'ANUJA TR',      periodsPerWeek: 7 },
-                { subject: 'ENG',     teacher: 'SHIJI TR',      periodsPerWeek: 5 },
-                { subject: 'S.S',     teacher: 'VINEETHA TR',   periodsPerWeek: 5 },
-                { subject: 'MAL',     teacher: 'JOSE SIR',      periodsPerWeek: 5 },
-                { subject: 'PHYSICS', teacher: 'ANU JOSMEI TR', periodsPerWeek: 3 },
-                { subject: 'CHE',     teacher: 'ASHLY TR',      periodsPerWeek: 3 },
-                { subject: 'BIO',     teacher: 'RENJINI TR',    periodsPerWeek: 3 },
-                { subject: 'HINDI',   teacher: 'SHANLEY TR',    periodsPerWeek: 3 },
-                { subject: 'IT',      teacher: 'CELINE TR',     periodsPerWeek: 2 },
-            ]
-        },
-        {
-            className: '11',
-            requirements: [
-                { subject: 'MATHS',     teacher: 'DINNY TR',      periodsPerWeek: 7 },
-                { subject: 'PHYSICS',   teacher: 'ANU JOSMEI TR', periodsPerWeek: 6 },
-                { subject: 'CHE',       teacher: 'ASHLY TR',      periodsPerWeek: 6 },
-                { subject: 'MAL/HINDI', teacher: 'JITHA TR',      periodsPerWeek: 4 },
-                { subject: 'ENG',       teacher: 'SHIJI TR',      periodsPerWeek: 4 },
-                { subject: 'BOTANY',    teacher: 'SRUTHY TR',     periodsPerWeek: 4 },
-                { subject: 'ZOOLOGY',   teacher: 'RENJINI TR',    periodsPerWeek: 4 },
-            ]
-        },
-        {
-            className: '12',
-            requirements: [
-                { subject: 'MATHS',     teacher: 'DINNY TR',      periodsPerWeek: 7 },
-                { subject: 'PHYSICS',   teacher: 'ANU JOSMEI TR', periodsPerWeek: 6 },
-                { subject: 'CHE',       teacher: 'ASHLY TR',      periodsPerWeek: 6 },
-                { subject: 'MAL/HINDI', teacher: 'SHANLEY TR',    periodsPerWeek: 4 },
-                { subject: 'ENG',       teacher: 'SHIJI TR',      periodsPerWeek: 4 },
-                { subject: 'BOTANY',    teacher: 'SRUTHY TR',     periodsPerWeek: 4 },
-                { subject: 'ZOOLOGY',   teacher: 'RENJINI TR',    periodsPerWeek: 4 },
-            ]
-        },
-    ];
-
-    await ClassRoom.insertMany(classData.map(c => ({ ...c, projectId: pid })));
-    console.log(`✅ Seed complete: Depaul project seeded with ${classData.length} classes.`);
-}
 
 // ─── Helper ────────────────────────────────────────────────────────────────────
 async function buildMasterSchedule(projectId) {
@@ -308,32 +37,97 @@ app.get('/api/health', (req, res) => {
     res.status(200).json({ message: 'AutoSchedule Pro server is running!' });
 });
 
+// ─── Auth Routes ───────────────────────────────────────────────────────────────
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        let user = await User.findOne({ username });
+        if (user) return res.status(400).json({ error: 'Username already exists' });
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        user = new User({ username, password: hashedPassword });
+        await user.save();
+
+        const payload = { user: { id: user.id, username: user.username } };
+        jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', { expiresIn: '7d' }, (err, token) => {
+            if (err) throw err;
+            res.json({ token, user: { username: user.username } });
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        const user = await User.findOne({ username });
+        if (!user) return res.status(400).json({ error: 'Invalid credentials' });
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(400).json({ error: 'Invalid credentials' });
+
+        const payload = { user: { id: user.id, username: user.username } };
+        jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', { expiresIn: '7d' }, (err, token) => {
+            if (err) throw err;
+            res.json({ token, user: { username: user.username } });
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
+app.get('/api/auth/me', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password');
+        res.json(user);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
 // ─── Project Routes ────────────────────────────────────────────────────────────
 
-app.get('/api/projects', async (req, res) => {
+app.get('/api/projects', auth, async (req, res) => {
     try {
-        const projects = await Project.find().sort({ createdAt: -1 }).lean();
+        const projects = await Project.find({ userId: req.user.id }).sort({ createdAt: -1 }).lean();
         res.status(200).json(projects);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch projects.' });
     }
 });
 
-app.post('/api/projects', async (req, res) => {
+app.post('/api/projects', auth, async (req, res) => {
     try {
         const { name, description } = req.body;
         if (!name) return res.status(400).json({ error: 'Project name is required.' });
-        const project = await Project.create({ name: name.trim(), description: description || '' });
+        
+        // Ensure name is unique for THIS user
+        const existing = await Project.findOne({ userId: req.user.id, name: name.trim() });
+        if (existing) return res.status(409).json({ error: 'You already have a project with this name.' });
+
+        const project = await Project.create({ 
+            userId: req.user.id, 
+            name: name.trim(), 
+            description: description || '' 
+        });
         res.status(201).json(project);
     } catch (error) {
-        if (error.code === 11000) return res.status(409).json({ error: 'A project with this name already exists.' });
         res.status(500).json({ error: 'Failed to create project.' });
     }
 });
 
-app.delete('/api/projects/:id', async (req, res) => {
+app.delete('/api/projects/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
+        const project = await Project.findOne({ _id: id, userId: req.user.id });
+        if (!project) return res.status(404).json({ error: 'Project not found or unauthorized.' });
+
         await Promise.all([
             Project.deleteOne({ _id: id }),
             Teacher.deleteMany({ projectId: id }),

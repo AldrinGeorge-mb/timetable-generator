@@ -5,7 +5,8 @@ const mongoose = require('mongoose');
  * All teachers, subjects, classes, and schedules are scoped to a project.
  */
 const ProjectSchema = new mongoose.Schema({
-    name: { type: String, required: true, unique: true, trim: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true, trim: true },
     description: { type: String, trim: true, default: '' },
     createdAt: { type: Date, default: Date.now }
 });

@@ -1,5 +1,4 @@
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 // 20 highly distinct, rich Tailwind colors
 const COLOR_PALETTE = [
@@ -25,7 +24,17 @@ const COLOR_PALETTE = [
     'bg-zinc-200 border-zinc-400'
 ];
 
-function generateTimetable(allClasses) {
+function generateTimetable(allClasses, project) {
+    const numDays = project?.settings?.numberOfDays || 5;
+    const DAYS = ALL_DAYS.slice(0, numDays);
+    const numPeriods = project?.settings?.periodsPerDay || 7;
+    const PERIODS = Array.from({ length: numPeriods }, (_, i) => i + 1);
+    const breaks = project?.settings?.breaks || [
+        { afterPeriod: 2, label: 'Interval' },
+        { afterPeriod: 4, label: 'Lunch' },
+        { afterPeriod: 6, label: 'Interval' }
+    ];
+
     const finalSchedules = {};
     const globalTeacherTracker = {};
 
@@ -103,7 +112,8 @@ function generateTimetable(allClasses) {
                     if (!tName) return 0;
                     let count = 0;
                     let curr = p - 1;
-                    const breaksBefore = { 3: true, 5: true, 7: true };
+                    const breaksBefore = {};
+                    breaks.forEach(b => { breaksBefore[b.afterPeriod + 1] = true; });
                     
                     while (curr >= 1) {
                         if (breaksBefore[curr + 1]) break;
@@ -117,7 +127,7 @@ function generateTimetable(allClasses) {
                 };
 
                 const dayIndex = DAYS.indexOf(day);
-                const remainingDays = 5 - dayIndex;
+                const remainingDays = DAYS.length - dayIndex;
 
                 // Check if a subject has already been scheduled in this specific period on a previous day
                 const hasSamePeriodFn = (subject) => cState.schedule.some(s => s.subject === subject && s.period === period);

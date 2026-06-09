@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
 import ExportModal from './ExportModal';
+import CustomDropdown from './CustomDropdown';
 
-const API = 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL || '';
 
 const authFetch = (url, options = {}) => {
     const token = localStorage.getItem('token');
@@ -11,21 +12,17 @@ const authFetch = (url, options = {}) => {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return fetch(url, { ...options, headers });
 };
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 // Tailwind safelist — keeps all color classes in the bundle
 const _SAFELIST = [
-    'bg-red-200 border-red-400', 'bg-blue-200 border-blue-400',
-    'bg-green-200 border-green-400', 'bg-yellow-200 border-yellow-400',
-    'bg-purple-200 border-purple-400', 'bg-orange-200 border-orange-400',
-    'bg-pink-200 border-pink-400', 'bg-teal-200 border-teal-400',
-    'bg-indigo-200 border-indigo-600', 'bg-lime-200 border-lime-400',
-    'bg-amber-200 border-amber-400', 'bg-cyan-200 border-cyan-400',
-    'bg-fuchsia-200 border-fuchsia-400', 'bg-emerald-200 border-emerald-400',
-    'bg-violet-200 border-violet-400', 'bg-rose-200 border-rose-400',
-    'bg-sky-200 border-sky-400', 'bg-slate-200 border-slate-400',
-    'bg-stone-200 border-stone-400', 'bg-zinc-200 border-zinc-400',
+    "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    "bg-rose-500/10 text-rose-400 border-rose-500/20",
+    "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+    "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
 ];
 
 // ─── Draggable Block ───────────────────────────────────────────────────────────
@@ -33,7 +30,12 @@ const _SAFELIST = [
 const EMPTY_IMG = new Image();
 EMPTY_IMG.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
+// ─── Draggable Block ───────────────────────────────────────────────────────────
+
 const DraggableBlock = memo(function DraggableBlock({ slot, onDelete, justMoved, onDragStart }) {
+    const isConflict = false; // We can add conflict visual later if needed
+    const bgStyle = slot.color ? slot.color : 'bg-surface-container border-outline-variant/30 text-on-surface';
+
     return (
         <div
             draggable
@@ -44,18 +46,21 @@ const DraggableBlock = memo(function DraggableBlock({ slot, onDelete, justMoved,
                 onDragStart(slot);
             }}
             onDragEnd={() => onDragStart(null)}
-            className={`group relative w-full h-full rounded-xl p-2 flex flex-col justify-center items-center cursor-grab active:cursor-grabbing select-none border shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]
-                ${slot.color ? slot.color : 'bg-white border-slate-200'}
-                ${justMoved ? 'ring-2 ring-indigo-400 animate-[pulse_1s_ease-in-out_2] bg-indigo-500/10 border-indigo-600/30' : 'hover:shadow-[0_4px_12px_-2px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all duration-200'}`}
+            className={`h-full w-full rounded-xl card-element p-3 flex flex-col justify-between border border-opacity-50 group relative overflow-hidden
+                ${bgStyle}
+                ${justMoved ? 'ring-2 ring-primary animate-[pulse_1s_ease-in-out_2]' : ''}`}
         >
-            <div className="absolute inset-0 bg-white/30 rounded-xl pointer-events-none" />
             <button
                 onMouseDown={e => e.stopPropagation()}
                 onClick={() => onDelete(slot.id, slot.subject)}
-                className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 text-rose-600 hover:text-white bg-white hover:bg-rose-500 border border-slate-200 hover:border-rose-500 rounded-full w-6 h-6 flex items-center justify-center text-[10px] font-bold transition-all leading-none shadow-sm z-10"
+                className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 text-error hover:text-white bg-white hover:bg-error border border-outline-variant/30 hover:border-error rounded-full w-6 h-6 flex items-center justify-center text-[10px] font-bold transition-all leading-none shadow-sm z-20"
             >✕</button>
-            <span className="font-extrabold text-slate-800 text-[13px] text-center leading-tight relative z-10 tracking-tight">{slot.subject}</span>
-            <span className="text-[10px] text-slate-800 font-bold mt-0.5 text-center leading-tight relative z-10">{slot.teacher}</span>
+            <div className="flex items-start mb-2 relative z-10 w-full overflow-hidden">
+                <span className="font-display text-lg leading-tight font-medium truncate" title={slot.subject}>{slot.subject}</span>
+            </div>
+            <div className="flex items-end mt-auto relative z-10 w-full overflow-hidden">
+                <span className="font-label-md text-xs opacity-80 truncate" title={slot.teacher}>{slot.teacher}</span>
+            </div>
         </div>
     );
 });
@@ -63,22 +68,29 @@ const DraggableBlock = memo(function DraggableBlock({ slot, onDelete, justMoved,
 const DroppableCell = memo(function DroppableCell({ day, period, children, isDraggingAny, isValid, onDrop, onDragOver }) {
     const [isOver, setIsOver] = useState(false);
 
-    let bgClass;
+    let bgClass = "relative z-10 group/slot";
+    let overlay = null;
+
     if (isOver) {
-        bgClass = "bg-indigo-500/10 ring-2 ring-inset ring-indigo-400 z-10 relative rounded-xl shadow-sm";
+        overlay = (
+            <div className="absolute inset-2 border border-dashed border-primary/40 rounded-xl bg-primary/5 flex items-center justify-center pointer-events-none z-20">
+                <div className="flex flex-col items-center gap-1">
+                    <span className="material-symbols-outlined text-primary/60 text-[20px]">file_download</span>
+                    <span className="font-label-md text-[10px] text-primary/60 uppercase tracking-widest">Drop Here</span>
+                </div>
+            </div>
+        );
     } else if (isDraggingAny) {
         if (isValid) {
-            bgClass = "bg-emerald-50/60 ring-2 ring-inset ring-emerald-400/60 rounded-xl";
+            bgClass += " grid-cell-shimmer";
         } else {
-            bgClass = "bg-rose-50/40 ring-1 ring-inset ring-rose-200/50 opacity-60 grayscale-[30%] rounded-xl";
+            bgClass += " opacity-40 grayscale-[30%]";
         }
-    } else {
-        bgClass = "hover:bg-white/10/80 rounded-xl";
     }
 
     return (
-        <td
-            className={`p-1.5 align-top h-24 transition-all duration-200 ${bgClass}`}
+        <div
+            className={`p-2 min-w-0 grid-slot border-r border-outline-variant/10 ${bgClass}`}
             onDragOver={e => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
@@ -93,17 +105,18 @@ const DroppableCell = memo(function DroppableCell({ day, period, children, isDra
                 onDrop(id, day, period);
             }}
         >
+            {overlay}
             {children || (
-                <div className="w-full h-full border border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 text-[10px] transition-colors">
-                    —
+                <div className="absolute inset-2 border border-dashed border-outline-variant/50 rounded-xl bg-surface-container-low/30 flex items-center justify-center pointer-events-none transition-all group-hover/slot:border-primary/30 group-hover/slot:bg-primary/5">
+                    <span className="font-label-md text-[10px] text-on-surface-variant/50 uppercase tracking-widest group-hover/slot:text-primary/50">Empty</span>
                 </div>
             )}
-        </td>
+        </div>
     );
 });
 
 // ─── Mini Read-Only Grid (for All Classes overview) ────────────────────────────
-const MiniGrid = memo(function MiniGrid({ className, slots, previewChain, large }) {
+const MiniGrid = memo(function MiniGrid({ className, slots, previewChain, large, DAYS, PERIODS }) {
     const getSlot = (day, period) => slots?.find(s => s.day === day && s.period === period);
 
     // Scale styles based on 'large' prop
@@ -228,213 +241,179 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
         (alternatives.safeEmptySlots?.length > 0 || alternatives.safeSwapSlots?.length > 0);
 
     return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-end p-6 pointer-events-none">
-            <div
-                className="bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.3)] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden pointer-events-auto border border-slate-200"
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-inverse-surface/10 backdrop-blur-sm z-40" onClick={() => { onPreviewChain && onPreviewChain(null); onCancel(); }}></div>
+            <main 
+                className="relative z-50 w-full max-w-lg bg-[#faf8ff]/95 backdrop-blur-md border border-border-light rounded-xl shadow-[0px_4px_20px_rgba(0,0,0,0.03)] flex flex-col overflow-hidden"
                 style={{ animation: 'popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}
             >
-                {/* ── Header ── */}
-                <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4 flex items-center gap-3 shrink-0">
-                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-white text-xl font-black">⚠</div>
-                    <div>
-                        <h3 className="text-white font-extrabold text-base leading-tight">Teacher Collision Detected</h3>
-                        <p className="text-orange-100 text-xs mt-0.5">Resolve the conflict without breaking global constraints</p>
-                    </div>
-                </div>
-
-                {/* ── Scrollable body ── */}
-                <div className="overflow-y-auto flex-1 px-6 py-5 flex flex-col gap-5">
-
-                    {/* Conflict messages */}
-                    <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Conflicts Detected</p>
-                        <div className="space-y-2">
-                            {conflict.messages.map((msg, i) => (
-                                <div key={i} className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
-                                    <span className="text-red-500 font-bold text-sm mt-0.5 shrink-0">✕</span>
-                                    <p className="text-red-700 text-sm font-medium leading-snug">{msg}</p>
-                                </div>
-                            ))}
+                <header className="bg-amber-soft border-b border-border-light p-5">
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <h1 className="font-headline-md text-headline-md text-amber-text flex items-center gap-2 m-0">
+                                <span className="material-symbols-outlined text-amber-text" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                                Teacher Collision Detected
+                            </h1>
+                            <p className="font-body-md text-sm text-amber-text/80 mt-1 mb-0">Resolve the conflict to maintain institutional integrity.</p>
                         </div>
+                        <button aria-label="Close modal" className="text-amber-text/60 hover:text-amber-text transition-colors mt-1" onClick={() => { onPreviewChain && onPreviewChain(null); onCancel(); }}>
+                            <span className="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                </header>
+
+                <div className="p-5 flex flex-col gap-5 bg-surface flex-1 overflow-y-auto max-h-[70vh] custom-scrollbar">
+                    <div className="flex flex-col gap-3">
+                        {conflict.messages.map((msg, i) => (
+                            <div key={i} className="bg-red-light border border-crimson-deep/20 rounded-lg p-3.5 flex items-start gap-2.5">
+                                <span className="material-symbols-outlined text-crimson-deep text-[20px] mt-0.5">error</span>
+                                <div className="font-body-md text-sm text-crimson-deep" dangerouslySetInnerHTML={{ __html: msg.replace(/([^ ]+ TR|[^ ]+ SIR)/g, '<strong>$1</strong>') }} />
+                            </div>
+                        ))}
                     </div>
 
-                    {/* Tabs */}
-                    <div className="flex border-b border-slate-200 mt-2">
-                        <button
+                    <nav aria-label="Resolution Tabs" className="flex border-b border-border-light relative shrink-0">
+                        <button 
                             onClick={() => setActiveTab('alternatives')}
-                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeTab === 'alternatives' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-gray-600'}`}
+                            className={`flex-1 py-2.5 font-label-md text-xs sm:text-sm transition-colors uppercase relative flex items-center justify-center gap-1.5 ${activeTab === 'alternatives' ? 'text-primary border-b-2 border-primary' : 'text-secondary hover:text-on-surface'}`}
                         >
-                            Alternatives (1-step)
+                            Alternatives
                         </button>
-                        <button
+                        <button 
                             onClick={() => setActiveTab('cascade')}
-                            className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'cascade' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-gray-600'}`}
+                            className={`flex-1 py-2.5 font-label-md text-xs sm:text-sm transition-colors uppercase relative flex items-center justify-center gap-1.5 ${activeTab === 'cascade' ? 'text-primary border-b-2 border-primary' : 'text-secondary hover:text-on-surface'}`}
                         >
-                            Smart Resolve (Multi-step)
-                            <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide font-black">New</span>
+                            Smart Resolve
+                            <span className="bg-tertiary-fixed text-on-tertiary-fixed text-[9px] px-1.5 py-0.5 rounded font-medium tracking-wide">NEW</span>
                         </button>
-                    </div>
+                    </nav>
 
-                    {/* ── Alternatives Tab ── */}
-                    {activeTab === 'alternatives' && (
-                        <div>
-                            {!alternatives && !altError && (
-                                <div className="flex items-center gap-2 text-slate-400 text-sm py-3">
-                                    <div className="w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
-                                    Computing collision-free slots…
-                                </div>
-                            )}
-
-                            {altError && <p className="text-red-500 text-sm">Could not compute alternatives.</p>}
-
-                            {alternatives && !hasAlternatives && (
-                                <div className="bg-gray-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-500">
-                                    No simple 1-step moves available. Try <strong>Smart Resolve</strong>.
-                                </div>
-                            )}
-
-                            {alternatives?.safeEmptySlots?.length > 0 && (
-                                <div className="mb-4">
-                                    <p className="text-xs text-emerald-600 font-semibold mb-2">● Move to empty slot</p>
-                                    <div className="flex flex-wrap gap-2">
-                                        {alternatives.safeEmptySlots.map(({ day, period }) => (
-                                            <button
-                                                key={`${day}-${period}`}
-                                                onClick={() => onSelectAlternative({ type: 'move', day, period })}
-                                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 text-white text-xs font-bold rounded-lg transition-colors"
-                                            >
-                                                {DAY_ABBREV[day]} P{period}
-                                            </button>
-                                        ))}
+                    <div className="flex flex-col gap-5">
+                        {activeTab === 'alternatives' && (
+                            <div className="flex flex-col gap-4">
+                                {!alternatives && !altError && (
+                                    <div className="font-body-md text-sm text-secondary">Computing collision-free slots…</div>
+                                )}
+                                {altError && <div className="font-body-md text-sm text-error">Could not compute alternatives.</div>}
+                                {alternatives && !hasAlternatives && (
+                                    <div className="font-body-md text-sm text-secondary">No simple 1-step moves available. Try Smart Resolve.</div>
+                                )}
+                                {alternatives?.safeEmptySlots?.length > 0 && (
+                                    <div className="flex flex-col gap-2.5">
+                                        <h3 className="font-label-md text-xs text-on-surface uppercase tracking-wide">Move to Empty Slot</h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {alternatives.safeEmptySlots.map(({ day, period }) => (
+                                                <button key={`${day}-${period}`} onClick={() => onSelectAlternative({ type: 'move', day, period })} className="border border-border-light text-on-surface font-label-md text-xs px-3 py-1.5 rounded uppercase tracking-wide hover:bg-surface-variant transition-colors bg-surface-container-lowest">
+                                                    {DAY_ABBREV[day]} P{period}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            )}
-
-                            {alternatives?.safeSwapSlots?.length > 0 && (
-                                <div>
-                                    <p className="text-xs text-blue-700 font-semibold mb-2">● Swap with another block</p>
-                                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                                        {alternatives.safeSwapSlots.map(alt => (
-                                            <button
-                                                key={`${alt.day}-${alt.period}`}
-                                                onClick={() => onSelectAlternative({ type: 'swap', ...alt })}
-                                                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl text-left transition-colors group"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className={`px-2.5 py-1 rounded-md border text-xs font-bold text-gray-800 ${alt.color || 'bg-white'}`}>
-                                                        {alt.subject}
-                                                    </span>
-                                                    <span className="text-slate-500 text-xs">{alt.teacher}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <span className="text-xs text-slate-400">{DAY_ABBREV[alt.day]} P{alt.period}</span>
-                                                    <span className="text-xs bg-blue-100 group-hover:bg-blue-200 text-blue-700 font-bold px-2 py-0.5 rounded-lg transition-colors">Swap ⇄</span>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ── Cascade Tab ── */}
-                    {activeTab === 'cascade' && (
-                        <div>
-                            {!cascades && !cascadeError && (
-                                <div className="flex items-center gap-2 text-slate-400 text-sm py-3">
-                                    <div className="w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
-                                    Searching across all classes for resolution chains…
-                                </div>
-                            )}
-
-                            {cascadeError && <p className="text-red-500 text-sm">Failed to search for cascades.</p>}
-
-                            {cascades?.blocked && (
-                                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
-                                    {cascades.reason || "This slot is permanently blocked. No sequence of moves can safely free it up."}
-                                </div>
-                            )}
-
-                            {cascades?.chains?.length === 0 && !cascades.blocked && (
-                                <div className="bg-gray-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-500">
-                                    Could not find any safe multi-step resolution within 3 moves.
-                                </div>
-                            )}
-
-                            {cascades?.chains?.length > 0 && (
-                                <div className="space-y-4">
-                                    <p className="text-xs font-medium text-slate-500">
-                                        Found {cascades.chains.length} way(s) to resolve this collision by cascading moves.
-                                    </p>
-                                    <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                                        {cascades.chains.map((chain, idx) => (
-                                            <div
-                                                key={idx}
-                                                className="border border-indigo-100 hover:border-indigo-300 bg-indigo-50/40 hover:bg-indigo-50/80 rounded-xl p-3 flex flex-col gap-2 transition-all cursor-default"
-                                                onMouseEnter={() => onPreviewChain && onPreviewChain(chain)}
-                                                onMouseLeave={() => onPreviewChain && onPreviewChain(null)}
-                                            >
-                                                <div className="flex justify-between items-center mb-1">
-                                                    <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">Option {idx + 1} ({chain.length} moves)</span>
-                                                    <button
-                                                        onClick={() => { onPreviewChain && onPreviewChain(null); onApplyCascade(chain); }}
-                                                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
-                                                    >
-                                                        Apply Chain
+                                )}
+                                {alternatives?.safeSwapSlots?.length > 0 && (
+                                    <div className="flex flex-col gap-2.5 mt-1">
+                                        <h3 className="font-label-md text-xs text-on-surface uppercase tracking-wide">Swap With Block</h3>
+                                        <div className="flex flex-col gap-2">
+                                            {alternatives.safeSwapSlots.map(alt => (
+                                                <div key={`${alt.day}-${alt.period}`} className="border border-border-light rounded-lg bg-surface-container-lowest p-3 flex justify-between items-center hover:border-primary/40 transition-colors">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="font-body-md text-sm text-on-surface">
+                                                            <span className="font-semibold">{alt.subject}</span>
+                                                            <span className="mx-2 text-outline/50">|</span>
+                                                            <span className="text-secondary">{alt.teacher}</span>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => onSelectAlternative({ type: 'swap', ...alt })} className="bg-primary/5 text-primary border border-primary/20 font-label-md text-[11px] px-3 py-1.5 rounded uppercase tracking-wide hover:bg-primary hover:text-white transition-colors shrink-0">
+                                                        Swap {DAY_ABBREV[alt.day]} P{alt.period}
                                                     </button>
                                                 </div>
-                                                <div className="space-y-1.5">
-                                                    {chain.map((move, mIdx) => (
-                                                        <div key={mIdx} className="flex items-center gap-2 text-[11px] bg-white border border-gray-100 rounded-lg px-2.5 py-1.5 shadow-sm">
-                                                            <span className="flex-1 truncate">
-                                                                <span className="font-bold text-gray-800">Class {move.className}:</span>{' '}
-                                                                <span className="font-semibold text-slate-800">{move.subject}</span>
-                                                            </span>
-                                                            <span className="text-slate-400 shrink-0">
-                                                                {DAY_ABBREV[move.fromDay]} P{move.fromPeriod} <strong className="text-indigo-600 mx-1">→</strong> {DAY_ABBREV[move.toDay]} P{move.toPeriod}
-                                                            </span>
-                                                        </div>
-                                                    ))}
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'cascade' && (
+                            <div className="flex flex-col gap-4">
+                                {!cascades && !cascadeError && (
+                                    <div className="font-body-md text-sm text-secondary">Searching across all classes for resolution chains…</div>
+                                )}
+                                {cascadeError && <div className="font-body-md text-sm text-error">Failed to search for cascades.</div>}
+                                {cascades?.blocked && (
+                                    <div className="font-body-md text-sm text-error">{cascades.reason || "This slot is permanently blocked."}</div>
+                                )}
+                                {cascades?.chains?.length === 0 && !cascades.blocked && (
+                                    <div className="font-body-md text-sm text-secondary">Could not find any safe multi-step resolution within 4 moves.</div>
+                                )}
+                                {cascades?.chains?.map((chain, idx) => (
+                                    <section key={idx} 
+                                        onMouseEnter={() => onPreviewChain && onPreviewChain(chain)}
+                                        onMouseLeave={() => onPreviewChain && onPreviewChain(null)}
+                                        className="border border-border-light rounded-lg bg-surface-container-lowest p-4 hover:border-primary/40 transition-colors"
+                                    >
+                                        <div className="flex justify-between items-center mb-3 pb-2.5 border-b border-border-light/50">
+                                            <h3 className="font-label-md text-xs text-on-surface uppercase tracking-wide">Option {idx + 1} ({chain.length} Moves)</h3>
+                                            <button onClick={() => { onPreviewChain && onPreviewChain(null); onApplyCascade(chain); }} className="bg-primary text-white font-label-md text-[11px] px-3 py-1.5 rounded uppercase tracking-wide hover:bg-primary/90 transition-colors">Apply Chain</button>
+                                        </div>
+                                        <div className="flex flex-col gap-1.5 relative">
+                                            <div className="absolute left-[11px] top-6 bottom-5 w-px bg-border-light z-0"></div>
+                                            {chain.map((move, mIdx) => (
+                                                <div key={mIdx} className="flex items-center gap-3 relative z-10 bg-surface-container-lowest py-1.5">
+                                                    <div className="w-6 h-6 rounded-full bg-surface-variant border border-border-light flex items-center justify-center text-[11px] font-bold text-secondary shrink-0">{mIdx + 1}</div>
+                                                    <div className="flex-1 font-body-md text-[13px] text-on-surface truncate">
+                                                        <span className="font-semibold text-slate-800">C{move.className}: {move.subject}</span>
+                                                        <span className="mx-2 text-outline/50">|</span>
+                                                        <span className="text-secondary">{DAY_ABBREV[move.fromDay]} P{move.fromPeriod}</span> <span className="material-symbols-outlined text-outline align-middle text-[14px]">arrow_forward</span> <span className="text-secondary">{DAY_ABBREV[move.toDay]} P{move.toPeriod}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="flex items-center gap-3 relative z-10 bg-surface-container-lowest py-1.5">
+                                                <div className="w-6 h-6 rounded-full bg-surface-variant border border-border-light flex items-center justify-center text-[11px] font-bold text-secondary shrink-0">{chain.length + 1}</div>
+                                                <div className="flex-1 font-body-md text-[13px] text-secondary">
+                                                    <span className="font-semibold text-slate-700">Swap Target</span>
+                                                    <span className="mx-2 text-outline/50">|</span>
+                                                    Slot becomes available
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                                        </div>
+                                    </section>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                {/* ── Footer actions ── */}
-                <div className="flex gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50 shrink-0">
-                    <button
-                        onClick={() => { onPreviewChain && onPreviewChain(null); onCancel(); }}
-                        className="flex-1 py-2.5 bg-white border border-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-xl transition-colors"
-                    >
+                <footer className="bg-surface-container-lowest border-t border-border-light p-4 flex justify-between items-center mt-auto shrink-0 gap-3">
+                    <button onClick={() => { onPreviewChain && onPreviewChain(null); onCancel(); }} className="font-label-md text-xs sm:text-sm text-secondary hover:text-on-surface transition-colors uppercase tracking-wide">
                         Cancel
                     </button>
-                    <button
-                        onClick={onForce}
-                        className="flex-1 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-bold text-sm rounded-xl transition-colors"
-                    >
-                        Force Original Swap (Breaks Rules)
+                    <button onClick={onForce} className="border border-error text-error font-label-md text-[11px] sm:text-xs px-3 py-2 rounded uppercase tracking-wide hover:bg-error-container/50 transition-colors flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[16px]">warning</span>
+                        Force Swap
                     </button>
-                </div>
-            </div>
-
-            <style>{`
-                @keyframes popIn {
-                    from { opacity: 0; transform: scale(0.92) translateY(12px); }
-                    to   { opacity: 1; transform: scale(1)    translateY(0); }
-                }
-            `}</style>
+                </footer>
+                
+                <style>{`
+                    @keyframes popIn {
+                        from { opacity: 0; transform: scale(0.92) translateY(12px); }
+                        to   { opacity: 1; transform: scale(1)    translateY(0); }
+                    }
+                `}</style>
+            </main>
         </div>
     );
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
-export default function TimetableGrid({ projectId }) {
+export default function TimetableGrid({ projectId, project, setHasUnsavedChanges, saveTimetableRef }) {
+    const DAYS = ALL_DAYS.slice(0, project?.settings?.numberOfDays || 5);
+    const PERIODS = Array.from({ length: project?.settings?.periodsPerDay || 7 }, (_, i) => i + 1);
+    const breaks = project?.settings?.breaks || [
+        { afterPeriod: 2, label: 'Interval' },
+        { afterPeriod: 4, label: 'Lunch' },
+        { afterPeriod: 6, label: 'Interval' }
+    ];
     const [allSchedules, setAllSchedules] = useState({});
     const [history, setHistory] = useState([]);
     const [classes, setClasses] = useState([]);
@@ -458,6 +437,8 @@ export default function TimetableGrid({ projectId }) {
     const tableRef = useRef(null);
     const overlayRef = useRef(null);
     const dragHandlerRef = useRef(null);
+
+    const gridColsString = `100px ${PERIODS.map(p => breaks.some(b => b.afterPeriod === p) ? 'minmax(0,1fr) 60px' : 'minmax(0,1fr)').join(' ')}`;
 
     const showToast = (message, type = 'info') => setToast({ message, type });
     const clearToast = useCallback(() => setToast({ message: '', type: 'info' }), []);
@@ -484,6 +465,12 @@ export default function TimetableGrid({ projectId }) {
             .finally(() => setLoading(false));
     }, []);
 
+    useEffect(() => {
+        if (setHasUnsavedChanges) {
+            setHasUnsavedChanges(isDirty);
+        }
+    }, [isDirty, setHasUnsavedChanges]);
+
     const handleSave = async () => {
         setSaving(true);
         try {
@@ -501,6 +488,12 @@ export default function TimetableGrid({ projectId }) {
             setSaving(false);
         }
     };
+
+    useEffect(() => {
+        if (saveTimetableRef) {
+            saveTimetableRef.current = handleSave;
+        }
+    }, [allSchedules, projectId]);
 
     const handleRegenerate = () => {
         requestConfirm(
@@ -916,135 +909,125 @@ export default function TimetableGrid({ projectId }) {
 
             <div className={`p-6 max-w-[96rem] mx-auto transition-opacity duration-300 ${previewChain ? 'opacity-30 blur-sm pointer-events-none' : ''}`}>
                 {/* ── Header ── */}
-                <div className="flex flex-wrap items-center justify-between gap-6 mb-8">
+                <div className="flex items-end justify-between mb-8 pb-4 flex-wrap gap-6">
                     <div>
-                        <h2 className="text-4xl font-black text-slate-800 tracking-tight drop-shadow-sm">
-                            {view === 'all'
-                                ? 'All Classes — Overview'
-                                : viewMode === 'teacher'
-                                    ? `Teacher ${selectedTeacher} — Schedule`
-                                    : `Class ${selectedClass} — Schedule`
-                            }
-                        </h2>
-                        <p className="text-slate-500 font-bold text-sm mt-1.5 uppercase tracking-wider">
+                        <h1 className="font-display text-5xl font-medium tracking-tight text-on-surface">Time Table</h1>
+                        <p className="text-on-surface-variant font-label-md mt-2 tracking-wide uppercase opacity-80">
                             {view === 'single'
                                 ? viewMode === 'class'
-                                    ? `${totalFilled}/35 slots filled · ${totalEmpty} empty`
-                                    : `${teacherSchedule.length}/40 slots teaching`
-                                : `${classes.length} classes · AI-Generated, Collision-Free`
+                                    ? `Class ${selectedClass} · ${totalFilled}/35 slots filled`
+                                    : `Teacher ${selectedTeacher} · ${teacherSchedule.length}/40 slots teaching`
+                                : `All Classes Overview`
                             }
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 border-b border-outline-variant/30 pb-2 flex-wrap">
                         {/* Undo Button */}
                         <button
                             onClick={handleUndo}
                             disabled={history.length === 0}
-                            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${history.length > 0
-                                ? 'bg-white border border-slate-200 text-slate-800 hover:bg-white shadow-sm hover:border-white/20'
-                                : 'bg-slate-50 border border-transparent text-slate-300 cursor-not-allowed'
-                                }`}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-label-md transition-colors btn-interactive border shadow-sm
+                                ${history.length > 0 
+                                    ? 'bg-surface-container hover:bg-surface-dim text-on-surface-variant border-outline-variant/50' 
+                                    : 'bg-surface-container/50 text-outline border-outline-variant/20 cursor-not-allowed opacity-60'}`}
                             title="Undo last action"
                         >
-                            <span>↩</span> Undo
+                            <span className="material-symbols-outlined text-[18px]">undo</span> Undo
                         </button>
 
-                        {/* View Toggle */}
-                        {view === 'single' && (
-                            <div className="flex bg-white backdrop-blur-sm border border-slate-200 rounded-xl p-1 gap-1 mr-2 shadow-inner">
-                                <button
-                                    onClick={() => setViewMode('class')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'class' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
-                                >
-                                    By Class
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('teacher')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${viewMode === 'teacher' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
-                                >
-                                    By Teacher
-                                </button>
-                            </div>
-                        )}
+                        {/* Save Button */}
+                        <button
+                            onClick={handleSave}
+                            disabled={!isDirty || saving}
+                            className={`flex items-center gap-2 px-5 py-2 rounded-xl font-label-md transition-all btn-interactive
+                                ${!isDirty && !saving ? 'bg-surface-container text-outline cursor-not-allowed border border-outline-variant/30 shadow-none' 
+                                : saving ? 'bg-primary/70 text-on-primary cursor-not-allowed shadow-md' 
+                                : 'bg-primary hover:bg-primary/90 text-on-primary shadow-md hover:shadow-lg hover:-translate-y-0.5'}`}
+                        >
+                            {saving ? (
+                                <><div className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" /> Saving...</>
+                            ) : isDirty ? (
+                                <>Save Changes <span className="w-2 h-2 rounded-full bg-error animate-pulse ml-1" /></>
+                            ) : (
+                                <>Saved</>
+                            )}
+                        </button>
 
-                        {/* Mode Toggle (Single vs All) */}
+                        {/* Export PDF */}
+                        <button
+                            onClick={() => setShowExportModal(true)}
+                            disabled={Object.keys(allSchedules).length === 0}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-dim text-on-surface-variant font-label-md transition-colors btn-interactive border border-outline-variant/50 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span> Export
+                        </button>
+
+                        <div className="w-px h-8 bg-outline-variant/30 mx-2"></div>
+
+                        {/* View Mode Toggle (Single vs All) */}
                         {viewMode === 'class' && (
-                            <div className="flex bg-white backdrop-blur-sm border border-slate-200 rounded-xl p-1 gap-1 shadow-inner">
+                            <div className="flex bg-surface-container p-1 rounded-xl border border-outline-variant/30 shadow-inner">
                                 <button
                                     onClick={() => setView('single')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'single' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
+                                    className={`px-4 py-1.5 rounded-lg font-label-md text-sm transition-all ${view === 'single' ? 'bg-surface shadow-sm text-on-surface border border-outline-variant/20' : 'text-on-surface-variant hover:text-on-surface'}`}
                                 >
                                     Single Class
                                 </button>
                                 <button
                                     onClick={() => setView('all')}
-                                    className={`px-5 py-2 rounded-lg text-sm font-black transition-all duration-300 ${view === 'all' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800 hover:bg-white/10'}`}
+                                    className={`px-4 py-1.5 rounded-lg font-label-md text-sm transition-all ${view === 'all' ? 'bg-surface shadow-sm text-on-surface border border-outline-variant/20' : 'text-on-surface-variant hover:text-on-surface'}`}
                                 >
                                     All Classes
                                 </button>
                             </div>
                         )}
 
-                        {/* Dropdown — only in single view */}
+                        {/* Dropdowns */}
                         {view === 'single' && viewMode === 'class' && (
-                            <select
+                            <CustomDropdown
+                                options={classes.map(cls => ({ value: cls, label: `Class ${cls}` }))}
                                 value={selectedClass}
-                                onChange={e => setSelectedClass(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                            >
-                                {classes.map(cls => (
-                                    <option key={cls} value={cls}>Class {cls}</option>
-                                ))}
-                            </select>
+                                onChange={setSelectedClass}
+                                placeholder="Select Class"
+                                icon="meeting_room"
+                            />
                         )}
-
                         {view === 'single' && viewMode === 'teacher' && (
-                            <select
+                            <CustomDropdown
+                                options={uniqueTeachers.map(t => ({ value: t, label: t }))}
                                 value={selectedTeacher}
-                                onChange={e => setSelectedTeacher(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-4 py-2 text-sm font-semibold text-slate-800 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                            >
-                                {uniqueTeachers.map(t => (
-                                    <option key={t} value={t}>{t}</option>
-                                ))}
-                            </select>
+                                onChange={setSelectedTeacher}
+                                placeholder="Select Teacher"
+                                icon="person"
+                            />
                         )}
 
-                        {/* Validating badge */}
+                        {/* Filter Segmented Control */}
+                        {view === 'single' && (
+                            <div className="flex bg-surface-container p-1 rounded-xl border border-outline-variant/30 shadow-inner ml-2">
+                                <button
+                                    onClick={() => setViewMode('class')}
+                                    className={`px-4 py-1.5 rounded-lg font-label-md text-sm transition-all ${viewMode === 'class' ? 'bg-surface shadow-sm text-on-surface border border-outline-variant/20' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                >
+                                    By Class
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('teacher')}
+                                    className={`px-4 py-1.5 rounded-lg font-label-md text-sm transition-all ${viewMode === 'teacher' ? 'bg-surface shadow-sm text-on-surface border border-outline-variant/20' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                >
+                                    By Teacher
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Validating indicator */}
                         {validating && (
-                            <span className="px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-600 text-xs font-bold rounded-lg animate-pulse">
-                                Validating move…
-                            </span>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-primary-container text-on-primary-container rounded-xl font-label-md text-xs border border-primary/20 animate-pulse ml-2">
+                                <div className="w-2.5 h-2.5 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                                Validating…
+                            </div>
                         )}
-
-                        {/* Persistence Controls */}
-                        <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
-                            {/* Export PDF button */}
-                            <button
-                                onClick={() => setShowExportModal(true)}
-                                disabled={Object.keys(allSchedules).length === 0}
-                                className="px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2 bg-white border border-slate-200 text-slate-800 hover:bg-white hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                Export PDF
-                            </button>
-                            <button
-                                onClick={handleSave}
-                                disabled={!isDirty || saving}
-                                className={`px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2 ${!isDirty && !saving ? 'bg-white text-slate-400 cursor-not-allowed border border-slate-200' : saving ? 'bg-emerald-600 text-white cursor-not-allowed opacity-80' : 'bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600'}`}
-                            >
-                                {saving ? (
-                                    <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                                ) : isDirty ? (
-                                    <>💾 Save Changes <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse ml-1" /></>
-                                ) : (
-                                    <>✅ Saved</>
-                                )}
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -1060,40 +1043,41 @@ export default function TimetableGrid({ projectId }) {
 
                 {/* ── Single Class Grid (with DnD) ── */}
                 {!loading && view === 'single' && viewMode === 'class' && (
-                    <div
-                        ref={tableRef}
-                        className="glass-card rounded-[32px] shadow-sm relative"
-                    >
-                        {/* Custom drag overlay — clamped to table bounds, driven via DOM ref (no re-renders) */}
-                        <div
-                            ref={overlayRef}
-                            style={{ display: 'none', width: 130, height: 84, willChange: 'transform' }}
-                        >
+                    <div ref={tableRef} className="bg-surface rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-outline-variant/30 overflow-hidden relative">
+                        <div ref={overlayRef} style={{ display: 'none', width: 130, height: 84, willChange: 'transform' }}>
                             <span className="font-extrabold text-slate-800 text-[13px] text-center leading-tight drop-shadow-sm" />
                             <span className="text-[10px] text-white/60/80 font-bold mt-0.5 text-center" />
                         </div>
-                        <table className="w-full text-center table-fixed border-collapse">
-                            <thead className="sticky top-0 z-20 shadow-sm">
-                                <tr className="bg-white backdrop-blur-md border-b border-slate-200">
-                                    <th className="sticky left-0 z-30 bg-slate-50/90 backdrop-blur-md py-4 px-2 w-[10%] text-slate-400 font-black text-center text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
-                                    {PERIODS.map(p => (
-                                        <th key={p} className="py-4 px-2 text-slate-800 font-extrabold text-sm w-[12.8%]">
-                                            Period {p}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
+                        
+                        <div className="min-w-[1200px] overflow-x-auto w-full">
+                            <div style={{ gridTemplateColumns: gridColsString }} className="grid w-full sticky top-0 z-30 bg-surface/95 backdrop-blur-xl border-b border-outline-variant/20 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                                <div className="p-4 border-r border-outline-variant/10 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-outline">calendar_month</span>
+                                </div>
+                                {PERIODS.map(p => {
+                                    const cols = [
+                                        <div key={`p-${p}`} className={`p-4 text-center ${p !== PERIODS.length || breaks.some(b => b.afterPeriod === p) ? 'border-r' : ''} border-outline-variant/10 text-on-surface font-display text-lg tracking-wide`}>Period {p}</div>
+                                    ];
+                                    const brk = breaks.find(b => b.afterPeriod === p);
+                                    if (brk) cols.push(
+                                        <div key={`b-${p}`} className={`bg-surface-container-low/50 ${p !== PERIODS.length ? 'border-r' : ''} border-outline-variant/10 flex items-center justify-center overflow-hidden`}>
+                                            <span className="text-[10px] tracking-[0.2em] text-on-surface-variant font-label-md uppercase rotate-[-90deg] whitespace-nowrap">{brk.label}</span>
+                                        </div>
+                                    );
+                                    return cols;
+                                })}
+                            </div>
+                            
+                            <div className="relative flex flex-col">
                                 {DAYS.map((day, i) => (
-                                    <tr key={day} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}`}>
-                                        <td className="sticky left-0 z-10 py-3 px-2 bg-white backdrop-blur-sm text-slate-800 font-black text-base text-center shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
-                                            {day.slice(0, 3)}
-                                        </td>
-                                        {PERIODS.map(period => {
+                                    <div key={day} style={{ gridTemplateColumns: gridColsString }} className={`grid w-full border-b border-outline-variant/10 ${i % 2 === 0 ? 'bg-surface' : 'bg-surface-container-low/30'}`}>
+                                        <div className="p-4 border-r border-outline-variant/10 flex flex-col items-center justify-center bg-surface/50 backdrop-blur-sm sticky left-0 z-20 shadow-[2px_0_8px_rgba(0,0,0,0.02)]">
+                                            <span className="font-display text-xl text-on-surface mb-1">{day.slice(0, 3)}</span>
+                                        </div>
+
+                                        {PERIODS.map((period) => {
                                             const slot = getSlotData(day, period);
                                             const isValid = validSlots[`${day}-${period}`];
-
-                                            // Check preview chain
                                             let previewMoveHere = null;
                                             let previewMoveOut = false;
                                             if (previewChain) {
@@ -1101,7 +1085,7 @@ export default function TimetableGrid({ projectId }) {
                                                 previewMoveOut = previewChain.some(m => m.fromDay === day && m.fromPeriod === period && m.className === selectedClass);
                                             }
 
-                                            return (
+                                            const cell = (
                                                 <DroppableCell
                                                     key={`${day}-${period}`}
                                                     day={day}
@@ -1111,9 +1095,9 @@ export default function TimetableGrid({ projectId }) {
                                                     onDrop={handleDrop}
                                                 >
                                                     {previewMoveHere ? (
-                                                        <div className="w-full h-full border-2 border-indigo-600 border-dashed rounded-lg p-2 flex flex-col justify-center items-center bg-indigo-50/80 animate-pulse">
-                                                            <span className="font-bold text-indigo-700 text-sm text-center leading-tight">{previewMoveHere.subject}</span>
-                                                            <span className="text-[10px] text-indigo-500 mt-1 text-center font-bold">New</span>
+                                                        <div className="w-full h-full border-2 border-primary border-dashed rounded-xl p-2 flex flex-col justify-center items-center bg-primary/10 animate-pulse">
+                                                            <span className="font-bold text-primary text-sm text-center leading-tight">{previewMoveHere.subject}</span>
+                                                            <span className="text-[10px] text-primary/70 mt-1 text-center font-bold">New</span>
                                                         </div>
                                                     ) : (
                                                         slot && <div className={previewMoveOut ? "opacity-20 grayscale transition-all duration-300 w-full h-full" : "w-full h-full"}>
@@ -1122,61 +1106,88 @@ export default function TimetableGrid({ projectId }) {
                                                     )}
                                                 </DroppableCell>
                                             );
+
+                                            // Inject breaks
+                                            const brk = breaks.find(b => b.afterPeriod === period);
+                                            if (brk) {
+                                                return [
+                                                    cell,
+                                                    <div key={`break-${day}-${period}`} className={`border-outline-variant/10 break-column min-h-[100px] ${period !== PERIODS.length ? 'border-r' : ''}`}></div>
+                                                ];
+                                            }
+                                            return cell;
                                         })}
-                                    </tr>
+                                    </div>
                                 ))}
-                            </tbody>
-                        </table>
+                            </div>
+                        </div>
                     </div>
                 )}
 
                 {/* ── Teacher Grid (Read-Only) ── */}
                 {!loading && view === 'single' && viewMode === 'teacher' && (
-                    <div className="glass-card rounded-[32px] shadow-sm">
-                        <table className="w-full text-center table-fixed border-collapse">
-                            <thead className="sticky top-0 z-20 shadow-sm">
-                                <tr className="bg-white backdrop-blur-md border-b border-slate-200">
-                                    <th className="sticky left-0 z-30 bg-slate-50/90 backdrop-blur-md py-4 px-2 w-[10%] text-slate-400 font-black text-center text-sm uppercase tracking-widest shadow-[4px_0_10px_rgba(0,0,0,0.02)]">Day</th>
-                                    {PERIODS.map(p => (
-                                        <th key={p} className="py-4 px-2 text-slate-800 font-extrabold text-sm w-[12.8%]">
-                                            Period {p}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
+                    <div className="bg-surface rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-outline-variant/30 overflow-hidden relative">
+                        <div className="min-w-[1200px] overflow-x-auto w-full">
+                            <div style={{ gridTemplateColumns: gridColsString }} className="grid w-full sticky top-0 z-30 bg-surface/95 backdrop-blur-xl border-b border-outline-variant/20 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                                <div className="p-4 border-r border-outline-variant/10 flex items-center justify-center">
+                                    <span className="material-symbols-outlined text-outline">calendar_month</span>
+                                </div>
+                                {PERIODS.map(p => {
+                                    const cols = [
+                                        <div key={`p-${p}`} className={`p-4 text-center ${p !== PERIODS.length || breaks.some(b => b.afterPeriod === p) ? 'border-r' : ''} border-outline-variant/10 text-on-surface font-display text-lg tracking-wide`}>Period {p}</div>
+                                    ];
+                                    const brk = breaks.find(b => b.afterPeriod === p);
+                                    if (brk) cols.push(
+                                        <div key={`b-${p}`} className={`bg-surface-container-low/50 ${p !== PERIODS.length ? 'border-r' : ''} border-outline-variant/10 flex items-center justify-center overflow-hidden`}>
+                                            <span className="text-[10px] tracking-[0.2em] text-on-surface-variant font-label-md uppercase rotate-[-90deg] whitespace-nowrap">{brk.label}</span>
+                                        </div>
+                                    );
+                                    return cols;
+                                })}
+                            </div>
+                            
+                            <div className="relative flex flex-col">
                                 {DAYS.map((day, i) => (
-                                    <tr key={day} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}`}>
-                                        <td className="sticky left-0 z-10 py-3 px-2 bg-white backdrop-blur-sm text-slate-800 font-black text-base text-center shadow-[4px_0_10px_rgba(0,0,0,0.02)]">
-                                            {day.slice(0, 3)}
-                                        </td>
+                                    <div key={day} style={{ gridTemplateColumns: gridColsString }} className={`grid w-full border-b border-outline-variant/10 ${i % 2 === 0 ? 'bg-surface' : 'bg-surface-container-low/30'}`}>
+                                        <div className="p-4 border-r border-outline-variant/10 flex flex-col items-center justify-center bg-surface/50 backdrop-blur-sm sticky left-0 z-20 shadow-[2px_0_8px_rgba(0,0,0,0.02)]">
+                                            <span className="font-display text-xl text-on-surface mb-1">{day.slice(0, 3)}</span>
+                                        </div>
+
                                         {PERIODS.map(period => {
                                             const slot = getSlotData(day, period);
-                                            return (
-                                                <td key={`${day}-${period}`} className="p-1.5 align-top h-24">
+                                            const cell = (
+                                                <div key={`${day}-${period}`} className="p-2 grid-slot border-r border-outline-variant/10 relative z-10 group/slot min-h-[100px]">
                                                     {slot ? (
-                                                        <div className={`p-3 rounded-xl text-left shadow-sm flex flex-col justify-between h-full min-h-[5.5rem] border ${slot.color ? slot.color.replace('bg-', 'bg-').replace('border-', 'border-') : 'bg-white border-slate-200'}`}>
-                                                            <div className="font-black text-[16px] text-slate-800 tracking-tight leading-tight">
-                                                                Class {slot.className}
+                                                        <div className={`h-full w-full rounded-xl card-element p-3 flex flex-col justify-between border border-opacity-50 relative overflow-hidden ${slot.color ? slot.color : 'bg-surface-container border-outline-variant/30 text-on-surface'}`}>
+                                                            <div className="flex justify-between items-start mb-2 relative z-10">
+                                                                <span className="font-display text-lg leading-tight font-medium truncate" title={`Class ${slot.className}`}>Class {slot.className}</span>
                                                             </div>
-                                                            <div className="text-[12px] font-extrabold text-indigo-600 bg-white/70 px-2 py-1 rounded-lg flex items-center justify-between mt-2 border border-brand-100/50">
-                                                                <span className="truncate drop-shadow-sm" title={slot.subject}>
-                                                                    {slot.subject}
-                                                                </span>
+                                                            <div className="flex justify-between items-end mt-auto relative z-10">
+                                                                <span className="font-label-md text-xs opacity-80 truncate" title={slot.subject}>{slot.subject}</span>
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <div className="w-full h-full min-h-[5.5rem] flex items-center justify-center text-slate-300 text-xs font-black tracking-widest uppercase border border-dashed border-slate-200 rounded-xl bg-white/20">
-                                                            Free
+                                                        <div className="absolute inset-2 border border-dashed border-outline-variant/50 rounded-xl bg-surface-container-low/30 flex items-center justify-center pointer-events-none transition-all group-hover/slot:border-primary/30 group-hover/slot:bg-primary/5">
+                                                            <span className="font-label-md text-[10px] text-on-surface-variant/50 uppercase tracking-widest group-hover/slot:text-primary/50">Free</span>
                                                         </div>
                                                     )}
-                                                </td>
+                                                </div>
                                             );
+
+                                            // Inject breaks
+                                            const brk = breaks.find(b => b.afterPeriod === period);
+                                            if (brk) {
+                                                return [
+                                                    cell,
+                                                    <div key={`break-${day}-${period}`} className={`border-outline-variant/10 break-column min-h-[100px] ${period !== PERIODS.length ? 'border-r' : ''}`}></div>
+                                                ];
+                                            }
+                                            return cell;
                                         })}
-                                    </tr>
+                                    </div>
                                 ))}
-                            </tbody>
-                        </table>
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -1210,7 +1221,7 @@ export default function TimetableGrid({ projectId }) {
                                 className="cursor-pointer hover:shadow-lg hover:scale-[1.01] transition-all rounded-xl"
                                 title={`Click to open Class ${cls}`}
                             >
-                                <MiniGrid className={cls} slots={allSchedules[cls]} />
+                                <MiniGrid className={cls} slots={allSchedules[cls]} previewChain={previewChain} large={false} DAYS={DAYS} PERIODS={PERIODS} />
                             </div>
                         ))}
                     </div>
@@ -1236,6 +1247,7 @@ export default function TimetableGrid({ projectId }) {
                 allSchedules={allSchedules}
                 classes={classes}
                 uniqueTeachers={uniqueTeachers}
+                project={project}
             />
         </>
     );

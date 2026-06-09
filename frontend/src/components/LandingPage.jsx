@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Toast from './Toast';
 import AuthModal from './AuthModal';
 
-const API = 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL || '';
 
 const LandingPage = ({ onSelectProject }) => {
     const canvasRef = useRef(null);
@@ -14,6 +14,18 @@ const LandingPage = ({ onSelectProject }) => {
     const [showForm, setShowForm] = useState(false);
     const [newName, setNewName] = useState('');
     const [newDesc, setNewDesc] = useState('');
+    
+    // Project Settings
+    const [numberOfDays, setNumberOfDays] = useState(5);
+    const [periodsPerDay, setPeriodsPerDay] = useState(7);
+    const [breaks, setBreaks] = useState([
+        { afterPeriod: 2, label: 'Interval' },
+        { afterPeriod: 4, label: 'Lunch' },
+        { afterPeriod: 6, label: 'Interval' }
+    ]);
+
+    const [modalConfig, setModalConfig] = useState(null);
+    const [modalInput, setModalInput] = useState('');
     const [toast, setToast] = useState({ message: '', type: 'info' });
     const showToast = (message, type = 'info') => setToast({ message, type });
 
@@ -84,7 +96,15 @@ const LandingPage = ({ onSelectProject }) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ name: newName.trim(), description: newDesc.trim() })
+                body: JSON.stringify({ 
+                    name: newName.trim(), 
+                    description: newDesc.trim(),
+                    settings: {
+                        numberOfDays: Number(numberOfDays) || 5,
+                        periodsPerDay: Number(periodsPerDay) || 7,
+                        breaks: breaks
+                    }
+                })
             });
             if (!resp.ok) {
                 const err = await resp.json();
@@ -94,6 +114,13 @@ const LandingPage = ({ onSelectProject }) => {
             setProjects(prev => [project, ...prev]);
             setNewName('');
             setNewDesc('');
+            setNumberOfDays(5);
+            setPeriodsPerDay(7);
+            setBreaks([
+                { afterPeriod: 2, label: 'Interval' },
+                { afterPeriod: 4, label: 'Lunch' },
+                { afterPeriod: 6, label: 'Interval' }
+            ]);
             setShowForm(false);
             showToast(`Project "${project.name}" created.`, 'success');
         } catch (e) {
@@ -103,20 +130,62 @@ const LandingPage = ({ onSelectProject }) => {
         }
     };
 
-    const handleDelete = async (project, e) => {
+    const promptDelete = (project, e) => {
         e.stopPropagation();
-        if (!window.confirm(`Delete project "${project.name}" and all its data? This cannot be undone.`)) return;
-        const token = localStorage.getItem('token');
-        try {
-            await fetch(`${API}/api/projects/${project._id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            setProjects(prev => prev.filter(p => p._id !== project._id));
-            showToast(`Project "${project.name}" deleted.`, 'warning');
-        } catch {
-            showToast('Failed to delete project.', 'error');
+        setModalConfig({ type: 'delete', project });
+    };
+
+    const promptRename = (project, e) => {
+        e.stopPropagation();
+        setModalConfig({ type: 'rename', project });
+        setModalInput(project.name);
+    };
+
+    const confirmAction = async () => {
+        if (!modalConfig) return;
+        const { type, project } = modalConfig;
+        
+        if (type === 'delete') {
+            const token = localStorage.getItem('token');
+            try {
+                await fetch(`${API}/api/projects/${project._id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                setProjects(prev => prev.filter(p => p._id !== project._id));
+                showToast(`Project "${project.name}" deleted.`, 'warning');
+            } catch {
+                showToast('Failed to delete project.', 'error');
+            }
+        } else if (type === 'rename') {
+            const finalName = modalInput.trim();
+            if (!finalName || finalName === project.name) {
+                setModalConfig(null);
+                return;
+            }
+            
+            const token = localStorage.getItem('token');
+            try {
+                const res = await fetch(`${API}/api/projects/${project._id}`, {
+                    method: 'PUT',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ name: finalName })
+                });
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Failed to rename project');
+                }
+                
+                setProjects(prev => prev.map(p => p._id === project._id ? { ...p, name: finalName } : p));
+                showToast('Project renamed successfully.', 'success');
+            } catch (err) {
+                showToast(err.message || 'Failed to rename project.', 'error');
+            }
         }
+        setModalConfig(null);
     };
 
     // --- Atmospheric Animation Logic ---
@@ -291,17 +360,6 @@ const LandingPage = ({ onSelectProject }) => {
                                 onClick={() => setDropdownOpen(!dropdownOpen)}
                                 className="group flex items-center gap-3 pl-2 pr-3 py-1.5 rounded-full bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/10 transition-all duration-300 shadow-sm hover:shadow-indigo-500/10"
                             >
-                                <div className="relative">
-                                    <div className="w-8 h-8 rounded-full overflow-hidden border border-white/10 group-hover:border-indigo-400/50 transition-colors">
-                                        <img
-                                            src={user.avatar}
-                                            alt={user.username}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    </div>
-                                    {/* Emerald Online Status Indicator */}
-                                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-[#050505] rounded-full"></div>
-                                </div>
 
                                 <div className="flex flex-col items-start hidden sm:flex">
                                     <span className="text-sm font-semibold text-slate-200 group-hover:text-white transition-colors leading-none tracking-tight">
@@ -364,40 +422,126 @@ const LandingPage = ({ onSelectProject }) => {
                 </header>
 
                 {/* Workspace Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-500">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-500">
 
                     {/* New Workspace Form / Card */}
                     {showForm ? (
-                        <div className="group relative aspect-[4/3] flex flex-col justify-center p-8 border-2 border-indigo-500/50 rounded-3xl bg-indigo-500/5 transition-all duration-500">
-                            <h3 className="font-sans text-lg text-white mb-4">New Project</h3>
+                        <div className="group relative flex flex-col p-8 rounded-3xl bg-[#131326]/80 backdrop-blur-2xl border border-indigo-500/30 shadow-[0_0_40px_rgba(79,70,229,0.15)] transition-all duration-500 overflow-hidden">
+                            {/* Decorative background glow */}
+                            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-indigo-400 to-transparent opacity-50"></div>
+                            
+                            <h3 className="font-sans text-xl font-medium text-white mb-6 flex items-center gap-2">
+                                <span className="material-symbols-outlined text-indigo-400 text-xl">add_circle</span>
+                                New Project Details
+                            </h3>
+                            
                             <input
                                 autoFocus
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-sans text-sm focus:outline-none focus:border-indigo-500/50 mb-3"
+                                className="w-full bg-white/[0.03] border border-white/10 hover:border-white/20 focus:border-indigo-500/50 focus:bg-white/[0.05] rounded-xl px-4 py-3.5 text-white font-sans text-sm focus:outline-none transition-all mb-4 placeholder:text-white/30"
                                 placeholder="Project Name..."
                                 value={newName}
                                 onChange={e => setNewName(e.target.value)}
                                 disabled={creating}
                             />
                             <textarea
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-sans text-sm focus:outline-none focus:border-indigo-500/50 mb-4 resize-none h-20"
+                                className="w-full bg-white/[0.03] border border-white/10 hover:border-white/20 focus:border-indigo-500/50 focus:bg-white/[0.05] rounded-xl px-4 py-3.5 text-white font-sans text-sm focus:outline-none transition-all mb-5 resize-none h-20 placeholder:text-white/30"
                                 placeholder="Optional description..."
                                 value={newDesc}
                                 onChange={e => setNewDesc(e.target.value)}
                                 disabled={creating}
                             />
-                            <div className="flex gap-2">
+
+                            <div className="grid grid-cols-2 gap-5 mb-6">
+                                <div>
+                                    <label className="text-[11px] text-white/50 mb-1.5 block uppercase tracking-widest font-semibold">Days per Week</label>
+                                    <div className="relative">
+                                        <input 
+                                            type="number" min="1" max="7"
+                                            className="w-full bg-white/[0.03] border border-white/10 hover:border-white/20 focus:border-indigo-500/50 focus:bg-white/[0.05] rounded-xl px-4 py-3 text-white font-sans text-sm focus:outline-none transition-all"
+                                            value={numberOfDays}
+                                            onChange={e => setNumberOfDays(e.target.value)}
+                                            disabled={creating}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[11px] text-white/50 mb-1.5 block uppercase tracking-widest font-semibold">Periods per Day</label>
+                                    <div className="relative">
+                                        <input 
+                                            type="number" min="1" max="15"
+                                            className="w-full bg-white/[0.03] border border-white/10 hover:border-white/20 focus:border-indigo-500/50 focus:bg-white/[0.05] rounded-xl px-4 py-3 text-white font-sans text-sm focus:outline-none transition-all"
+                                            value={periodsPerDay}
+                                            onChange={e => setPeriodsPerDay(e.target.value)}
+                                            disabled={creating}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mb-8">
+                                <div className="flex justify-between items-end mb-3">
+                                    <label className="text-[11px] text-white/50 uppercase tracking-widest font-semibold">Breaks & Intervals</label>
+                                    <button 
+                                        onClick={() => setBreaks([...breaks, { afterPeriod: 1, label: 'Interval' }])}
+                                        className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1"
+                                    >
+                                        <span className="material-symbols-outlined text-[14px]">add</span> Add Break
+                                    </button>
+                                </div>
+                                <div className="space-y-2.5">
+                                    {breaks.map((brk, i) => (
+                                        <div key={i} className="group/break flex gap-3 items-center bg-white/[0.02] hover:bg-white/[0.04] p-3 rounded-xl border border-white/5 hover:border-white/10 transition-all">
+                                            <div className="flex-1 flex items-center gap-3">
+                                                <span className="text-sm font-medium text-white/40">After Period</span>
+                                                <input 
+                                                    type="number" min="1" max={periodsPerDay}
+                                                    value={brk.afterPeriod}
+                                                    onChange={e => setBreaks(prev => prev.map((b, idx) => idx === i ? { ...b, afterPeriod: Number(e.target.value) } : b))}
+                                                    className="w-14 bg-white/5 border border-white/10 rounded-lg py-1 text-white text-sm text-center focus:outline-none focus:border-indigo-400 transition-colors"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <select 
+                                                    value={brk.label}
+                                                    onChange={e => setBreaks(prev => prev.map((b, idx) => idx === i ? { ...b, label: e.target.value } : b))}
+                                                    className="appearance-none bg-white/5 border border-white/10 rounded-lg pl-3 pr-8 py-1.5 text-white text-sm focus:outline-none focus:border-indigo-400 transition-colors cursor-pointer"
+                                                >
+                                                    <option className="bg-slate-800" value="Interval">Interval</option>
+                                                    <option className="bg-slate-800" value="Lunch">Lunch</option>
+                                                </select>
+                                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-white/40">
+                                                    <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => setBreaks(prev => prev.filter((_, idx) => idx !== i))}
+                                                className="w-8 h-8 flex items-center justify-center rounded-lg text-white/30 hover:bg-rose-500/10 hover:text-rose-400 transition-colors"
+                                            >
+                                                <span className="material-symbols-outlined text-[18px]">close</span>
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {breaks.length === 0 && (
+                                        <div className="py-4 text-center border border-dashed border-white/10 rounded-xl bg-white/[0.01]">
+                                            <p className="text-sm text-white/30">No breaks configured.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 mt-auto">
                                 <button
                                     onClick={() => setShowForm(false)}
-                                    className="flex-1 py-2 font-sans text-xs uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+                                    className="flex-1 py-3.5 font-sans text-xs uppercase tracking-widest font-semibold text-white/50 hover:text-white transition-all border border-white/10 rounded-xl hover:bg-white/5 hover:border-white/20"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     onClick={handleCreate}
                                     disabled={!newName.trim() || creating}
-                                    className="flex-1 py-2 font-sans text-xs uppercase tracking-widest text-indigo-300 bg-indigo-500/10 rounded-lg hover:bg-indigo-500/20 transition-colors disabled:opacity-50"
+                                    className="flex-[1.5] py-3.5 font-sans text-xs uppercase tracking-widest font-bold text-white bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)] transition-all disabled:opacity-50 disabled:grayscale"
                                 >
-                                    {creating ? 'Creating...' : 'Create'}
+                                    {creating ? 'Creating...' : 'Create Project'}
                                 </button>
                             </div>
                         </div>
@@ -436,7 +580,16 @@ const LandingPage = ({ onSelectProject }) => {
                                             <div className="px-3 py-1 rounded-md bg-indigo-500/20 text-indigo-300 text-[10px] uppercase tracking-widest font-sans border border-indigo-500/30">Active</div>
                                             <div className="flex items-center gap-2">
                                                 <button
-                                                    onClick={(e) => handleDelete(project, e)}
+                                                    onClick={(e) => promptRename(project, e)}
+                                                    className="opacity-0 group-hover:opacity-100 p-1 text-white/20 hover:text-indigo-400 transition-colors z-20"
+                                                    title="Rename Project"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    onClick={(e) => promptDelete(project, e)}
                                                     className="opacity-0 group-hover:opacity-100 p-1 text-white/20 hover:text-red-400 transition-colors z-20"
                                                     title="Delete Project"
                                                 >
@@ -473,6 +626,54 @@ const LandingPage = ({ onSelectProject }) => {
                 <p className="font-sans text-xs text-white/20 uppercase tracking-widest">© 2026 Schedulify Intelligence Systems. All rights reserved.</p>
 
             </footer>
+            {/* Custom Modal for Rename/Delete */}
+            {modalConfig && (
+                <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-200">
+                    <div className="bg-[#0f1016] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl">
+                        <div className="p-8">
+                            <h3 className="text-2xl font-light text-white mb-3">
+                                {modalConfig.type === 'delete' ? 'Delete Project' : 'Rename Project'}
+                            </h3>
+                            {modalConfig.type === 'delete' ? (
+                                <p className="text-white/50 text-sm leading-relaxed">
+                                    Are you sure you want to delete <span className="text-white font-medium">{modalConfig.project.name}</span>? All associated teachers, classes, and schedules will be permanently wiped. This action cannot be undone.
+                                </p>
+                            ) : (
+                                <div className="mt-6">
+                                    <label className="text-[11px] font-bold text-white/40 uppercase tracking-widest block mb-3">New Name</label>
+                                    <input 
+                                        type="text"
+                                        value={modalInput}
+                                        onChange={e => setModalInput(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && confirmAction()}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-4 text-white focus:outline-none focus:border-indigo-500/50 transition-colors shadow-inner"
+                                        autoFocus
+                                    />
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-8 py-5 bg-white/5 border-t border-white/10 flex items-center justify-end gap-3">
+                            <button 
+                                onClick={() => setModalConfig(null)}
+                                className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={confirmAction}
+                                className={`px-6 py-2.5 text-xs font-bold uppercase tracking-widest rounded-xl transition-all ${
+                                    modalConfig.type === 'delete' 
+                                    ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' 
+                                    : 'bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 border border-indigo-500/30'
+                                }`}
+                            >
+                                {modalConfig.type === 'delete' ? 'Delete' : 'Rename'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };

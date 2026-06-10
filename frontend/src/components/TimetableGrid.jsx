@@ -583,14 +583,19 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
     };
 
     const commitSwap = (draggedBlock, occupant, newDay, newPeriod) => {
-        updateSchedules(prev => ({
-            ...prev,
-            [selectedClass]: prev[selectedClass].map(s => {
-                if (s.id === occupant.id) return { ...s, day: draggedBlock.day, period: draggedBlock.period };
-                if (s.id === draggedBlock.id) return { ...s, day: newDay, period: newPeriod };
+        updateSchedules(prev => {
+            const arr = prev[selectedClass] || [];
+            const isFromUnassigned = !draggedBlock.day || !draggedBlock.period;
+            let nextArr = arr.map(s => {
+                if (s.id === occupant.id) return { ...s, day: draggedBlock.day || null, period: draggedBlock.period || null };
+                if (!isFromUnassigned && s.id === draggedBlock.id) return { ...s, day: newDay, period: newPeriod };
                 return s;
-            })
-        }));
+            });
+            if (isFromUnassigned) {
+                nextArr.push({ ...draggedBlock, day: newDay, period: newPeriod, id: `block_${Date.now()}` });
+            }
+            return { ...prev, [selectedClass]: nextArr.filter(s => s.day && s.period) };
+        });
         showToast(`Forced swap: ${draggedBlock.subject} ↔ ${occupant.subject}`, 'warning');
         setPendingSwap(null);
     };
@@ -783,14 +788,19 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                 }
 
                 // Both legs are clear — commit the swap immediately
-                updateSchedules(prev => ({
-                    ...prev,
-                    [selectedClass]: prev[selectedClass].map(s => {
-                        if (s.id === occupant.id) return { ...s, day: draggedBlock.day, period: draggedBlock.period };
-                        if (s.id === draggedBlockId) return { ...s, day: newDay, period: newPeriod };
+                updateSchedules(prev => {
+                    const arr = prev[selectedClass] || [];
+                    const isFromUnassigned = !draggedBlock.day || !draggedBlock.period;
+                    let nextArr = arr.map(s => {
+                        if (s.id === occupant.id) return { ...s, day: draggedBlock.day || null, period: draggedBlock.period || null };
+                        if (!isFromUnassigned && s.id === draggedBlockId) return { ...s, day: newDay, period: newPeriod };
                         return s;
-                    })
-                }));
+                    });
+                    if (isFromUnassigned) {
+                        nextArr.push({ ...draggedBlock, day: newDay, period: newPeriod, id: `block_${Date.now()}` });
+                    }
+                    return { ...prev, [selectedClass]: nextArr.filter(s => s.day && s.period) };
+                });
                 showToast(`Swapped ${draggedBlock.subject} ↔ ${occupant.subject}`, 'success');
             } catch {
                 showToast('Validation server unreachable', 'error');
@@ -827,12 +837,16 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
             }
 
             // Move is valid — update state
-            updateSchedules(prev => ({
-                ...prev,
-                [selectedClass]: prev[selectedClass].map(s =>
-                    s.id === draggedBlockId ? { ...s, day: newDay, period: newPeriod } : s
-                )
-            }));
+            updateSchedules(prev => {
+                const arr = prev[selectedClass] || [];
+                const isFromUnassigned = !draggedBlock.day || !draggedBlock.period;
+                return {
+                    ...prev,
+                    [selectedClass]: isFromUnassigned
+                        ? [...arr, { ...draggedBlock, day: newDay, period: newPeriod, id: `block_${Date.now()}` }]
+                        : arr.map(s => s.id === draggedBlockId ? { ...s, day: newDay, period: newPeriod } : s)
+                };
+            });
             showToast(`Moved ${draggedBlock.subject} → ${newDay} Period ${newPeriod}`, 'success');
         } catch {
             showToast('Validation server unreachable', 'error');
@@ -848,14 +862,16 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
 
         if (alt.type === 'move') {
             // Move dragged block to a safe empty slot; original occupant stays put
-            updateSchedules(prev => ({
-                ...prev,
-                [selectedClass]: prev[selectedClass].map(s =>
-                    s.id === draggedBlock.id
-                        ? { ...s, day: alt.day, period: alt.period }
-                        : s
-                )
-            }));
+            updateSchedules(prev => {
+                const arr = prev[selectedClass] || [];
+                const isFromUnassigned = !draggedBlock.day || !draggedBlock.period;
+                return {
+                    ...prev,
+                    [selectedClass]: isFromUnassigned
+                        ? [...arr, { ...draggedBlock, day: alt.day, period: alt.period, id: `block_${Date.now()}` }]
+                        : arr.map(s => s.id === draggedBlock.id ? { ...s, day: alt.day, period: alt.period } : s)
+                };
+            });
             showToast(`✅ Moved ${draggedBlock.subject} → ${DAY_ABBREV[alt.day]} P${alt.period} (collision-free)`, 'success');
         } else {
             // Swap dragged block with an alternative partner — both directions are pre-validated

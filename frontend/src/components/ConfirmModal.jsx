@@ -7,7 +7,9 @@ export default function ConfirmModal({
     onConfirm, 
     onCancel, 
     confirmText = "Confirm", 
-    confirmColor = "bg-red-600 hover:bg-red-700 text-white" 
+    confirmColor = "bg-red-600 hover:bg-red-700 text-white",
+    onSecondary,
+    secondaryText
 }) {
     if (!isOpen) return null;
     
@@ -32,6 +34,14 @@ export default function ConfirmModal({
                     >
                         Cancel
                     </button>
+                    {onSecondary && secondaryText && (
+                        <button
+                            onClick={onSecondary}
+                            className="px-6 py-3 bg-rose-50 border border-rose-100 text-rose-600 text-sm font-bold rounded-2xl hover:bg-rose-100 transition-all shadow-sm"
+                        >
+                            {secondaryText}
+                        </button>
+                    )}
                     <button
                         onClick={onConfirm}
                         className={`px-6 py-3 text-sm font-bold rounded-2xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 ${confirmColor}`}

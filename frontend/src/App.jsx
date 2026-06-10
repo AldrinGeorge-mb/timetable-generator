@@ -36,8 +36,8 @@ export default function App() {
   const saveTimetableRef = useRef(null);
 
   const showToast = useCallback((message, type = 'info') => setToast({ message, type }), []);
-  const requestConfirm = useCallback((title, message, action, confirmText = 'Delete', confirmColor = 'bg-red-600 hover:bg-red-700 text-white') => {
-      setPendingConfirm({ title, message, action, confirmText, confirmColor });
+  const requestConfirm = useCallback((title, message, action, confirmText = 'Delete', confirmColor = 'bg-red-600 hover:bg-red-700 text-white', secondaryAction = null, secondaryText = null) => {
+      setPendingConfirm({ title, message, action, confirmText, confirmColor, secondaryAction, secondaryText });
   }, []);
 
   const fetchAll = useCallback(async () => {
@@ -104,7 +104,13 @@ export default function App() {
                   if (newAdminTab) setAdminTab(newAdminTab);
               },
               "Save & Switch",
-              "bg-primary hover:opacity-90 text-white"
+              "bg-primary hover:opacity-90 text-white",
+              () => {
+                  setActiveTab(newActiveTab);
+                  if (newAdminTab) setAdminTab(newAdminTab);
+                  setHasUnsavedChanges(false);
+              },
+              "Discard Changes"
           );
       } else {
           setActiveTab(newActiveTab);
@@ -122,7 +128,12 @@ export default function App() {
                   setCurrentProject(null);
               },
               "Save & Exit",
-              "bg-primary hover:opacity-90 text-white"
+              "bg-primary hover:opacity-90 text-white",
+              () => {
+                  setCurrentProject(null);
+                  setHasUnsavedChanges(false);
+              },
+              "Discard Changes"
           );
       } else {
           setCurrentProject(null);
@@ -225,6 +236,11 @@ export default function App() {
                 setPendingConfirm(null);
             }}
             onCancel={() => setPendingConfirm(null)}
+            onSecondary={pendingConfirm.secondaryAction ? () => {
+                pendingConfirm.secondaryAction();
+                setPendingConfirm(null);
+            } : null}
+            secondaryText={pendingConfirm.secondaryText}
         />
     )}
     

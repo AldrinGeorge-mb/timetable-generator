@@ -543,7 +543,7 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
             const newHistory = [...h];
             const lastState = newHistory.pop();
             setAllSchedules(lastState);
-            setIsDirty(true);
+            setIsDirty(newHistory.length > 0);
             showToast('Action undone', 'info');
             return newHistory;
         });

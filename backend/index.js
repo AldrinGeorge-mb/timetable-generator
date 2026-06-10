@@ -42,14 +42,7 @@ app.post('/api/find-cascade', (req, res, next) => {
     require('./routes/timetable')(req, res, next);
 });
 
-// ─── Serve Frontend in Production ──────────────────────────────────────────────
-if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
-    app.get('*', (req, res) => {
-        res.sendFile(path.resolve(__dirname, '../frontend/dist', 'index.html'));
-    });
-}
+// ─── Only serving API endpoints in this backend service ────────────────────────
 
 // ─── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;

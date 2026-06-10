@@ -120,11 +120,14 @@ router.post('/validate-move', async (req, res) => {
 
 // ─── Suggest Alternatives ──────────────────────────────────────────────────────
 router.post('/suggest-alternatives', async (req, res) => {
-    const { teacherName, originalDay, originalPeriod, currentClassName, allSchedules } = req.body;
+    const { teacherName, originalDay, originalPeriod, currentClassName, allSchedules, settings } = req.body;
     try {
         const currentSchedule = allSchedules[currentClassName] || [];
-        const DAYS    = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-        const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+        const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const numDays = settings?.numberOfDays || 5;
+        const DAYS = ALL_DAYS.slice(0, numDays);
+        const numPeriods = settings?.periodsPerDay || 7;
+        const PERIODS = Array.from({ length: numPeriods }, (_, i) => i + 1);
         const safeEmptySlots = [];
         const safeSwapSlots  = [];
 
@@ -165,10 +168,13 @@ router.post('/suggest-alternatives', async (req, res) => {
 
 // ─── Find Cascade Chains ───────────────────────────────────────────────────────
 router.post('/find-cascade', async (req, res) => {
-    const { draggedBlock, targetDay, targetPeriod, currentClassName, allSchedules } = req.body;
+    const { draggedBlock, targetDay, targetPeriod, currentClassName, allSchedules, settings } = req.body;
     try {
-        const DAYS    = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-        const PERIODS = [1, 2, 3, 4, 5, 6, 7];
+        const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const numDays = settings?.numberOfDays || 5;
+        const DAYS = ALL_DAYS.slice(0, numDays);
+        const numPeriods = settings?.periodsPerDay || 7;
+        const PERIODS = Array.from({ length: numPeriods }, (_, i) => i + 1);
 
         const isGloballyFree = (teacher, day, period, vp) => {
             for (const [id, pos] of vp) {

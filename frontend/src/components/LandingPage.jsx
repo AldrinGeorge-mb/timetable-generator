@@ -10,6 +10,7 @@ const LandingPage = ({ onSelectProject }) => {
     // --- Dynamic State Logic ---
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isWakingUp, setIsWakingUp] = useState(false);
     const [creating, setCreating] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [newName, setNewName] = useState('');
@@ -69,6 +70,9 @@ const LandingPage = ({ onSelectProject }) => {
             setLoading(false);
             return;
         }
+
+        const timeout = setTimeout(() => setIsWakingUp(true), 3000);
+
         fetch(`${API}/api/projects`, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
@@ -78,7 +82,11 @@ const LandingPage = ({ onSelectProject }) => {
                 else setProjects([]);
             })
             .catch(() => showToast('Failed to connect to backend', 'error'))
-            .finally(() => setLoading(false));
+            .finally(() => {
+                clearTimeout(timeout);
+                setIsWakingUp(false);
+                setLoading(false);
+            });
     }, [user]);
 
     const handleCreate = async () => {
@@ -122,6 +130,7 @@ const LandingPage = ({ onSelectProject }) => {
                 { afterPeriod: 6, label: 'Interval' }
             ]);
             setShowForm(false);
+            onSelectProject(project, true);
             showToast(`Project "${project.name}" created.`, 'success');
         } catch (e) {
             showToast(e.message, 'error');
@@ -413,8 +422,8 @@ const LandingPage = ({ onSelectProject }) => {
             {/* Hero Section */}
             <main className="relative z-10 max-w-7xl mx-auto px-8 pt-24 pb-12">
                 <header className="mb-16 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-300">
-                    <h1 className="text-7xl font-light mb-4 tracking-tight leading-tight">
-                        Welcome to <span className="italic text-indigo-300">Schedulify</span>.
+                    <h1 className="text-6xl md:text-7xl font-light mb-4 tracking-tight leading-tight">
+                        Free AI <span className="italic text-indigo-300">Timetable Generator</span>.
                     </h1>
                     <p className="text-xl text-white/50 font-sans font-light max-w-2xl">
                         Smart school scheduling is now incredibly simple. Just enter your teachers, subjects, and class requirements into the system, and let us handle the rest. Schedulify instantly generates a flawless, ready-to-use timetable with zero double-bookings, delivering a perfectly balanced schedule for your entire school in seconds.
@@ -561,8 +570,14 @@ const LandingPage = ({ onSelectProject }) => {
 
                     {/* Render Dynamic Workspaces */}
                     {loading ? (
-                        <div className="aspect-[4/3] flex items-center justify-center border border-white/5 rounded-3xl bg-white/5">
-                            <div className="w-8 h-8 border-2 border-white/10 border-t-indigo-500 rounded-full animate-spin"></div>
+                        <div className="aspect-[4/3] flex flex-col items-center justify-center border border-white/5 rounded-3xl bg-white/5 p-6 text-center">
+                            <div className="w-8 h-8 border-2 border-white/10 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
+                            {isWakingUp && (
+                                <p className="text-xs text-white/40 font-sans tracking-wide animate-pulse">
+                                    Waking up backend server...<br/>
+                                    (Free tiers take ~50s to boot)
+                                </p>
+                            )}
                         </div>
                     ) : (
                         projects.map(project => {

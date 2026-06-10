@@ -7,6 +7,7 @@ import ClassesTab from './components/ClassesTab';
 import Toast from './components/Toast';
 import ConfirmModal from './components/ConfirmModal';
 import Navbar from './components/Navbar';
+import WalkthroughModal from './components/WalkthroughModal';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -21,6 +22,8 @@ export default function App() {
   const [currentProject, setCurrentProject] = useState(null);
   const [activeTab, setActiveTab] = useState('grid');
   const [adminTab, setAdminTab] = useState('teachers');
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
+  const [isAutoPopup, setIsAutoPopup] = useState(false);
 
   // Global Admin State
   const [teachers, setTeachers] = useState([]);
@@ -134,7 +137,14 @@ export default function App() {
 
   // Show landing page if no project is selected
   if (!currentProject) {
-    return <LandingPage onSelectProject={(project) => { setCurrentProject(project); setActiveTab('grid'); }} />;
+    return <LandingPage onSelectProject={(project) => { 
+        setCurrentProject(project); 
+        setActiveTab('grid'); 
+        if (localStorage.getItem('schedulify_hide_walkthrough') !== 'true') {
+            setIsAutoPopup(true);
+            setShowWalkthrough(true);
+        }
+    }} />;
   }
 
   return (
@@ -148,6 +158,10 @@ export default function App() {
           handleTabSwitch={handleTabSwitch}
           adminTab={adminTab}
           handleRegenerate={handleRegenerate}
+          onOpenWalkthrough={() => {
+              setIsAutoPopup(false);
+              setShowWalkthrough(true);
+          }}
       />
 
       {/* ── MAIN CONTENT ── */}
@@ -213,6 +227,12 @@ export default function App() {
             onCancel={() => setPendingConfirm(null)}
         />
     )}
+    
+    <WalkthroughModal 
+        isOpen={showWalkthrough} 
+        isAutoPopup={isAutoPopup}
+        onClose={() => setShowWalkthrough(false)} 
+    />
     </>
   );
 }

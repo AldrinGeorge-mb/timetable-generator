@@ -5,7 +5,8 @@ export default function Navbar({
     activeTab,
     handleTabSwitch,
     adminTab,
-    handleRegenerate
+    handleRegenerate,
+    onOpenWalkthrough
 }) {
     return (
         <header className="h-20 border-b border-outline-variant/30 bg-surface/80 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-8 shrink-0">
@@ -58,13 +59,21 @@ export default function Navbar({
                 </button>
             </nav>
 
-            <div className="flex items-center gap-6 w-90 justify-end">
+            <div className="flex items-center gap-4 justify-end">
                 <button
                     onClick={handleRegenerate}
                     className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-container/60 backdrop-blur-md border border-outline-variant/30 text-primary font-label-md hover:bg-primary hover:text-on-primary hover:shadow-md transition-all btn-interactive"
                 >
                     <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
                     Generate Time Table                </button>
+
+                <button
+                    onClick={onOpenWalkthrough}
+                    className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors tooltip-trigger relative"
+                    title="Help & Walkthrough"
+                >
+                    <span className="material-symbols-outlined text-[22px]">help</span>
+                </button>
             </div>
         </header>
     );

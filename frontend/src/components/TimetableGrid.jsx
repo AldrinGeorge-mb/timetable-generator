@@ -207,6 +207,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                 originalPeriod: conflict.draggedBlock.period,
                 currentClassName: conflict.currentClassName,
                 allSchedules: conflict.allSchedules,
+                settings: conflict.settings,
             }),
         })
             .then(r => r.json())
@@ -228,6 +229,7 @@ function SwapConflictModal({ conflict, onForce, onCancel, onSelectAlternative, o
                 targetPeriod: conflict.newPeriod,
                 currentClassName: conflict.currentClassName,
                 allSchedules: conflict.allSchedules,
+                settings: conflict.settings,
             }),
         })
             .then(r => r.json())
@@ -742,6 +744,7 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                             targetPeriod: newPeriod,
                             currentClassName: selectedClass,
                             allSchedules: tempAllSchedules,
+                            settings: project?.settings,
                         }),
                     }).then(r => r.json()),
                     authFetch(`${API}/api/validate-move`, {
@@ -753,6 +756,7 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                             targetPeriod: draggedBlock.period,
                             currentClassName: selectedClass,
                             allSchedules: tempAllSchedules,
+                            settings: project?.settings,
                         }),
                     }).then(r => r.json()),
                 ]);
@@ -772,7 +776,8 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                         newDay,
                         newPeriod,
                         currentClassName: selectedClass,
-                        allSchedules
+                        allSchedules,
+                        settings: project?.settings
                     });
                     return;
                 }
@@ -811,6 +816,7 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                     targetPeriod: newPeriod,
                     currentClassName: selectedClass,
                     allSchedules: tempAllSchedules,
+                    settings: project?.settings,
                 }),
             });
             const result = await resp.json();
@@ -864,7 +870,8 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
     };
 
     const totalFilled = currentSchedule.length;
-    const totalEmpty = 35 - totalFilled;
+    const totalSlots = DAYS.length * PERIODS.length;
+    const totalEmpty = totalSlots - totalFilled;
 
     return (
         <>
@@ -915,8 +922,8 @@ export default function TimetableGrid({ projectId, project, setHasUnsavedChanges
                         <p className="text-on-surface-variant font-label-md mt-2 tracking-wide uppercase opacity-80">
                             {view === 'single'
                                 ? viewMode === 'class'
-                                    ? `Class ${selectedClass} · ${totalFilled}/35 slots filled`
-                                    : `Teacher ${selectedTeacher} · ${teacherSchedule.length}/40 slots teaching`
+                                    ? `Class ${selectedClass} · ${totalFilled}/${totalSlots} slots filled`
+                                    : `Teacher ${selectedTeacher} · ${teacherSchedule.length}/${totalSlots} slots teaching`
                                 : `All Classes Overview`
                             }
                         </p>
